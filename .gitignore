@@ -1,0 +1,53 @@
+# Compiled binaries
+r2s3-cli
+r2s3-cli.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Config files with credentials
+config.toml
+*.toml
+
+# Log files
+*.log
+/tmp/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code files
+.claude/
+claude_workspace/
+
+# Test files
+*_test.log
+latest_test.log
+new_test.log
+download_test.log
+
+# Dependencies
+vendor/
