@@ -3,17 +3,20 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -45,7 +48,12 @@ type KeyMap struct {
 	Delete       key.Binding
 	Download     key.Binding
 	Preview      key.Binding
+	Search       key.Binding
+	Upload       key.Binding
+	ClearSearch  key.Binding
 	ChangeBucket key.Binding
+	NextPage     key.Binding
+	PrevPage     key.Binding
 	Help         key.Binding
 	Quit         key.Binding
 	Confirm      key.Binding
@@ -92,12 +100,32 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("d", "download"),
 		),
 		Preview: key.NewBinding(
-			key.WithKeys("p"),
-			key.WithHelp("p", "preview URL"),
+			key.WithKeys("v"),
+			key.WithHelp("v", "preview URL"),
+		),
+		Search: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "search"),
+		),
+		Upload: key.NewBinding(
+			key.WithKeys("u"),
+			key.WithHelp("u", "upload"),
+		),
+		ClearSearch: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "clear search"),
 		),
 		ChangeBucket: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "change bucket"),
+		),
+		NextPage: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "next page"),
+		),
+		PrevPage: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "prev page"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?", "h"),
@@ -120,7 +148,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to be shown in the mini help view
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.ChangeBucket, k.Help, k.Quit}
+	return []key.Binding{k.Search, k.Upload, k.ChangeBucket, k.Help, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view
@@ -129,9 +157,39 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Home, k.End, k.Refresh},
 		{k.Download, k.Preview, k.Delete},
-		{k.ChangeBucket, k.Help, k.Quit},
+		{k.Search, k.Upload, k.ClearSearch},
+		{k.ChangeBucket},
+		{k.NextPage, k.PrevPage},
+		{k.Help, k.Quit},
 	}
 }
+
+// InputMode represents different input modes
+type InputMode int
+
+const (
+	InputModeNone InputMode = iota
+	InputModeSearch
+	InputModeUpload
+)
+
+// InputComponentMode represents different input component types
+type InputComponentMode int
+
+const (
+	InputComponentText InputComponentMode = iota
+	InputComponentFilePicker
+)
+
+// MessageType represents different message types for status display
+type MessageType int
+
+const (
+	MessageInfo MessageType = iota
+	MessageSuccess
+	MessageWarning
+	MessageError
+)
 
 // FileBrowserModel represents the file browser TUI model
 type FileBrowserModel struct {
@@ -168,6 +226,58 @@ type FileBrowserModel struct {
 	// Bucket selector overlay
 	showingBucketSelector bool
 	bucketSelector        *BucketSelectorModel
+	
+	// Pagination
+	currentPage        int
+	hasNextPage       bool
+	continuationToken string
+	paginationLoading bool // Loading state for pagination (different from initial loading)
+	estimatedTotalPages int // Estimated total pages (updated as we navigate)
+	
+	// Input states
+	showInput        bool
+	inputMode        InputMode
+	inputComponentMode InputComponentMode
+	textInput        textinput.Model
+	filePicker       filepicker.Model
+	inputPrompt      string
+	
+	// Message system
+	statusMessage    string
+	messageType      MessageType
+	messageTimer     time.Time
+	
+	// Search state
+	searchQuery      string
+	isSearchMode     bool
+	
+	// Upload state
+	uploadProgress   progress.Model
+	uploading        bool
+	uploadingFile    string
+}
+
+// createFilePicker creates a properly configured file picker
+func createFilePicker() filepicker.Model {
+	fp := filepicker.New()
+	
+	// Set the current directory to a sensible default
+	if cwd, err := os.Getwd(); err == nil {
+		fp.CurrentDirectory = cwd
+	} else {
+		// Fallback to home directory
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			fp.CurrentDirectory = homeDir
+		} else {
+			fp.CurrentDirectory = "/"
+		}
+	}
+	
+	// Allow all file types
+	fp.AllowedTypes = []string{}
+	fp.ShowHidden = false
+	
+	return fp
 }
 
 // NewFileBrowserModel creates a new file browser model
@@ -220,7 +330,7 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		BorderForeground(lipgloss.Color("#FFEB3B")).
 		Padding(1, 2)
 
-	return &FileBrowserModel{
+	m := &FileBrowserModel{
 		client:         client,
 		config:         cfg,
 		bucketName:     bucketName,
@@ -236,7 +346,53 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		help:           h,
 		spinner:        s,
 		helpViewport:   vp,
+		currentPage:    1,
+		hasNextPage:   false,
+		estimatedTotalPages: 1,
+		
+		// Input states
+		showInput:          false,
+		inputMode:          InputModeNone,
+		inputComponentMode: InputComponentText,
+		textInput:          textinput.New(),
+		filePicker:         createFilePicker(),
+		
+		// Message system
+		statusMessage:  "",
+		messageType:    MessageInfo,
+		
+		// Search state
+		searchQuery:    "",
+		isSearchMode:   false,
+		
+		// Upload state
+		uploadProgress: progress.New(progress.WithDefaultGradient()),
+		uploading:      false,
+		uploadingFile:  "",
 	}
+	
+	// Configure text input
+	m.textInput.Placeholder = "Type here..."
+	m.textInput.Focus()
+	m.textInput.CharLimit = 200
+	m.textInput.Width = 40
+	
+	// Configure file picker
+	m.filePicker.AllowedTypes = []string{} // Allow all file types
+	m.filePicker.ShowPermissions = false
+	m.filePicker.ShowSize = true
+	m.filePicker.ShowHidden = false
+	// Set current directory to user's home directory
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		m.filePicker.CurrentDirectory = homeDir
+	} else {
+		// Fallback to current working directory
+		if cwd, err := os.Getwd(); err == nil {
+			m.filePicker.CurrentDirectory = cwd
+		}
+	}
+	
+	return m
 }
 
 // SetProgram sets the tea.Program reference for direct message sending
@@ -284,12 +440,33 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirmDelete {
 			return m.handleDeleteConfirmation(msg)
 		}
+		
+		// Handle input popup
+		if m.showInput {
+			return m.handleInputPopup(msg)
+		}
+		
 		return m.handleNavigation(msg)
 
 	case filesLoadedMsg:
 		m.loading = false
+		m.paginationLoading = false
 		m.files = msg.files
+		m.hasNextPage = msg.hasNext
+		m.continuationToken = msg.nextToken
 		m.error = msg.err
+		
+		// Update estimated total pages
+		if msg.hasNext {
+			// If there are more pages, estimate at least currentPage + 1
+			if m.currentPage >= m.estimatedTotalPages {
+				m.estimatedTotalPages = m.currentPage + 1
+			}
+		} else {
+			// If this is the last page, we know the exact total
+			m.estimatedTotalPages = m.currentPage
+		}
+		
 		if m.error == nil {
 			m.updateTable()
 		}
@@ -396,18 +573,43 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case uploadCompletedMsg:
+		m.uploading = false
+		m.uploadingFile = ""
+		if msg.err != nil {
+			m.setMessage(fmt.Sprintf("Upload failed: %v", msg.err), MessageError)
+		} else {
+			m.setMessage(fmt.Sprintf("File '%s' uploaded successfully", msg.file), MessageSuccess)
+			// Refresh files to show the new upload
+			return m, m.loadFiles()
+		}
+		return m, nil
+
 	default:
+		// Handle component internal messages
+		var cmds []tea.Cmd
+		
 		// Handle progress bar internal messages
-		var cmd tea.Cmd
 		progressModel, progressCmd := m.downloadProgress.Update(msg)
 		if progressModel != nil {
 			if pm, ok := progressModel.(progress.Model); ok {
 				m.downloadProgress = pm
 			}
 		}
-		cmd = progressCmd
-
-		return m, cmd
+		if progressCmd != nil {
+			cmds = append(cmds, progressCmd)
+		}
+		
+		// Handle file picker internal messages if showing input with file picker
+		if m.showInput && m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
+			filePickerModel, filePickerCmd := m.filePicker.Update(msg)
+			m.filePicker = filePickerModel
+			if filePickerCmd != nil {
+				cmds = append(cmds, filePickerCmd)
+			}
+		}
+		
+		return m, tea.Batch(cmds...)
 	}
 }
 
@@ -512,6 +714,40 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			return m, m.generatePreviewURL(file.Key)
 		}
 
+	case key.Matches(msg, m.keyMap.Search):
+		if m.downloading || m.uploading {
+			return m, nil
+		}
+		m.showInput = true
+		m.inputMode = InputModeSearch
+		m.inputComponentMode = InputComponentText
+		m.inputPrompt = "Search objects:"
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Enter search query..."
+		m.textInput.Focus()
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.Upload):
+		if m.downloading || m.uploading {
+			return m, nil
+		}
+		m.showInput = true
+		m.inputMode = InputModeUpload
+		m.inputComponentMode = InputComponentText // Default to text input
+		m.inputPrompt = "Upload file path:"
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Enter file path... (Tab: file picker)"
+		m.textInput.Focus()
+		return m, nil
+
+	case key.Matches(msg, m.keyMap.ClearSearch):
+		if m.isSearchMode {
+			m.clearSearch()
+			m.setMessage("Search cleared", MessageInfo)
+			return m, m.loadFiles()
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keyMap.Delete):
 		if m.downloading {
 			return m, nil
@@ -527,12 +763,40 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 		return m, m.openBucketSelector()
 
+	case key.Matches(msg, m.keyMap.NextPage):
+		if m.downloading || m.paginationLoading {
+			return m, nil
+		}
+		if m.hasNextPage {
+			m.paginationLoading = true
+			m.cursor = 0
+			m.currentPage++
+			return m, m.loadFiles()
+		}
+
+	case key.Matches(msg, m.keyMap.PrevPage):
+		if m.downloading || m.paginationLoading {
+			return m, nil
+		}
+		if m.currentPage > 1 {
+			m.paginationLoading = true
+			m.cursor = 0
+			m.currentPage--
+			m.continuationToken = "" // Reset to load from beginning
+			// For previous page, we need to implement page stack or reload from start
+			// For simplicity, let's just reload from the first page and navigate
+			return m, m.loadFromPage(m.currentPage)
+		}
+
 	case key.Matches(msg, m.keyMap.Refresh):
 		if m.downloading {
 			return m, nil
 		}
 		m.loading = true
 		m.error = nil
+		m.currentPage = 1
+		m.continuationToken = ""
+		m.estimatedTotalPages = 1
 		m.infoMessage = "" // Clear info message on refresh
 		return m, m.loadFiles()
 
@@ -595,6 +859,9 @@ func (m *FileBrowserModel) View() string {
 	if m.prefix != "" {
 		header += fmt.Sprintf("/%s", m.prefix)
 	}
+	if m.isSearchMode && m.searchQuery != "" {
+		header += fmt.Sprintf(" [Search: '%s'] (c: clear)", m.searchQuery)
+	}
 	headerLine := headerStyle.Render(header)
 
 	// Show loading state with spinner
@@ -623,13 +890,50 @@ func (m *FileBrowserModel) View() string {
 		rightPanel,
 	)
 
-	// Footer with help
+	// Footer with help and status messages
 	footerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#808080")).
 		MarginTop(1)
 
 	// Use bubbles help component for footer
-	footerLine := footerStyle.Render(m.help.ShortHelpView(m.keyMap.ShortHelp()))
+	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
+	
+	// Add status message if present
+	var footerContent string
+	if m.statusMessage != "" && time.Since(m.messageTimer) < 5*time.Second {
+		// Create status message with appropriate color
+		var messageColor string
+		var messageIcon string
+		switch m.messageType {
+		case MessageError:
+			messageColor = "#FF0000"
+			messageIcon = "❌"
+		case MessageSuccess:
+			messageColor = "#00FF00"
+			messageIcon = "✅"
+		case MessageWarning:
+			messageColor = "#FFFF00"
+			messageIcon = "⚠️"
+		default: // MessageInfo
+			messageColor = "#00FFFF"
+			messageIcon = "ℹ️"
+		}
+		
+		messageStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(messageColor)).
+			Bold(true)
+		
+		messageLine := messageStyle.Render(fmt.Sprintf("%s %s", messageIcon, m.statusMessage))
+		footerContent = lipgloss.JoinVertical(lipgloss.Left, helpLine, messageLine)
+	} else {
+		// Clear expired message
+		if m.statusMessage != "" && time.Since(m.messageTimer) >= 5*time.Second {
+			m.clearMessage()
+		}
+		footerContent = helpLine
+	}
+	
+	footerLine := footerStyle.Render(footerContent)
 
 	baseView := headerLine + "\n" + content + "\n" + footerLine
 
@@ -648,6 +952,10 @@ func (m *FileBrowserModel) View() string {
 
 	if m.showingBucketSelector && m.bucketSelector != nil {
 		return m.renderFloatingDialog(baseView, m.bucketSelector.View())
+	}
+
+	if m.showInput {
+		return m.renderFloatingDialog(baseView, m.renderInputPopup())
 	}
 
 	return baseView
@@ -679,6 +987,28 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 			MarginTop(1)
 
 		countInfo := fmt.Sprintf("Total: %d files", len(m.files))
+		
+		// Add pagination info
+		var pageInfo string
+		if m.hasNextPage {
+			pageInfo = fmt.Sprintf(" | Page %d/%d+", m.currentPage, m.estimatedTotalPages)
+		} else {
+			pageInfo = fmt.Sprintf(" | Page %d/%d", m.currentPage, m.estimatedTotalPages)
+		}
+		
+		if m.currentPage > 1 {
+			pageInfo += " (p: prev)"
+		}
+		if m.hasNextPage {
+			pageInfo += " (n: next)"
+		}
+		
+		// Add loading spinner for pagination
+		if m.paginationLoading {
+			pageInfo += fmt.Sprintf(" %s", m.spinner.View())
+		}
+		
+		countInfo += pageInfo
 		tableView += "\n" + countStyle.Render(countInfo)
 	}
 
@@ -959,10 +1289,97 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 	return dialogStyle.Render(dialogContent)
 }
 
+// renderInputPopup renders the input popup dialog
+func (m *FileBrowserModel) renderInputPopup() string {
+	// Create title based on input mode
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFEB3B")).
+		Align(lipgloss.Center).
+		MarginBottom(1)
+
+	var title string
+	switch m.inputMode {
+	case InputModeSearch:
+		title = titleStyle.Render("🔍 Search Objects")
+	case InputModeUpload:
+		if m.inputComponentMode == InputComponentFilePicker {
+			title = titleStyle.Render("📤 Upload File (File Picker)")
+		} else {
+			title = titleStyle.Render("📤 Upload File (Text Input)")
+		}
+	default:
+		title = titleStyle.Render("Input")
+	}
+
+	// Create prompt
+	promptStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		MarginBottom(1)
+
+	prompt := promptStyle.Render(m.inputPrompt)
+
+	// Create input field based on component mode
+	var inputField string
+	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
+		// Render file picker
+		inputField = m.filePicker.View()
+	} else {
+		// Render text input
+		inputField = m.textInput.View()
+	}
+
+	// Create instructions
+	instructionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#808080")).
+		Italic(true).
+		Align(lipgloss.Center).
+		MarginTop(1)
+
+	var instructions string
+	if m.inputMode == InputModeUpload {
+		if m.inputComponentMode == InputComponentFilePicker {
+			instructions = instructionStyle.Render("[Enter] Select • [Tab] Text Input • [Esc] Cancel")
+		} else {
+			instructions = instructionStyle.Render("[Enter] Confirm • [Tab] File Picker • [Esc] Cancel")
+		}
+	} else {
+		instructions = instructionStyle.Render("[Enter] Confirm • [Esc] Cancel")
+	}
+
+	// Combine all elements
+	dialogContent := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		prompt,
+		inputField,
+		instructions,
+	)
+
+	// Style the dialog container with appropriate size
+	dialogWidth := min(60, m.windowWidth-10)
+	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
+		// Make dialog larger for file picker
+		dialogWidth = min(80, m.windowWidth-5)
+	}
+
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#FFEB3B")).
+		Padding(1).
+		Width(dialogWidth).
+		Background(lipgloss.Color("#1a1a1a")).
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	return dialogStyle.Render(dialogContent)
+}
+
 // Message types for tea.Cmd communication
 type filesLoadedMsg struct {
-	files []FileItem
-	err   error
+	files     []FileItem
+	hasNext   bool
+	nextToken string
+	err       error
 }
 
 type deleteCompletedMsg struct {
@@ -979,28 +1396,79 @@ type bucketSelectorClosedMsg struct{}
 // loadFiles loads files from R2
 func (m *FileBrowserModel) loadFiles() tea.Cmd {
 	return func() tea.Msg {
-		files, err := m.fetchFiles()
-		return filesLoadedMsg{files: files, err: err}
+		files, hasNext, nextToken, err := m.fetchFiles(m.continuationToken)
+		return filesLoadedMsg{files: files, hasNext: hasNext, nextToken: nextToken, err: err}
+	}
+}
+
+// loadFromPage loads files from a specific page (used for previous page navigation)
+func (m *FileBrowserModel) loadFromPage(targetPage int) tea.Cmd {
+	return func() tea.Msg {
+		// For previous page navigation, we need to reload from the beginning
+		// and skip to the target page. This is less efficient but simpler to implement
+		var continuationToken string
+		var currentPage int = 1
+		
+		for currentPage < targetPage {
+			files, hasNext, nextToken, err := m.fetchFiles(continuationToken)
+			if err != nil {
+				return filesLoadedMsg{files: nil, hasNext: false, nextToken: "", err: err}
+			}
+			
+			if !hasNext {
+				// We've reached the end before our target page
+				return filesLoadedMsg{files: files, hasNext: hasNext, nextToken: nextToken, err: nil}
+			}
+			
+			continuationToken = nextToken
+			currentPage++
+		}
+		
+		// Now load the target page
+		files, hasNext, nextToken, err := m.fetchFiles(continuationToken)
+		return filesLoadedMsg{files: files, hasNext: hasNext, nextToken: nextToken, err: err}
 	}
 }
 
 // fetchFiles fetches files from R2 bucket
-func (m *FileBrowserModel) fetchFiles() ([]FileItem, error) {
+func (m *FileBrowserModel) fetchFiles(continuationToken string) ([]FileItem, bool, string, error) {
+	return m.fetchFilesWithQuery(continuationToken, m.searchQuery)
+}
+
+func (m *FileBrowserModel) fetchFilesWithQuery(continuationToken, searchQuery string) ([]FileItem, bool, string, error) {
 	s3Client := m.client.GetS3Client()
+
+	// Use configured page size
+	pageSize := int32(m.config.UI.PageSize)
 
 	// List objects
 	input := &s3.ListObjectsV2Input{
 		Bucket:  aws.String(m.bucketName),
-		MaxKeys: aws.Int32(1000),
+		MaxKeys: aws.Int32(pageSize),
 	}
 
-	if m.prefix != "" {
-		input.Prefix = aws.String(m.prefix)
+	// Combine original prefix with search query
+	var prefix string
+	if m.prefix != "" && searchQuery != "" {
+		// Combine original prefix with search query
+		prefix = m.prefix + searchQuery
+	} else if m.prefix != "" {
+		prefix = m.prefix
+	} else if searchQuery != "" {
+		prefix = searchQuery
+	}
+	
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+
+	if continuationToken != "" {
+		input.ContinuationToken = aws.String(continuationToken)
 	}
 
 	result, err := s3Client.ListObjectsV2(context.TODO(), input)
 	if err != nil {
-		return nil, err
+		return nil, false, "", err
 	}
 
 	files := make([]FileItem, 0, len(result.Contents))
@@ -1020,7 +1488,11 @@ func (m *FileBrowserModel) fetchFiles() ([]FileItem, error) {
 		})
 	}
 
-	return files, nil
+	// Check if there are more results
+	hasNext := aws.ToBool(result.IsTruncated)
+	nextToken := aws.ToString(result.NextContinuationToken)
+
+	return files, hasNext, nextToken, nil
 }
 
 // deleteFile deletes a file from R2
@@ -1235,4 +1707,201 @@ func (m *FileBrowserModel) openBucketSelector() tea.Cmd {
 
 	// Return command to load buckets
 	return m.bucketSelector.Init()
+}
+
+// handleInputPopup handles input popup interactions
+func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		// Cancel input
+		m.showInput = false
+		m.inputMode = InputModeNone
+		m.textInput.SetValue("")
+		m.textInput.Blur()
+		m.clearMessage()
+		return m, nil
+
+	case "tab":
+		// Switch between text input and file picker (for upload mode only)
+		if m.inputMode == InputModeUpload {
+			if m.inputComponentMode == InputComponentText {
+				m.inputComponentMode = InputComponentFilePicker
+				m.textInput.Blur()
+				// Initialize and focus file picker when switching to it
+				m.filePicker = createFilePicker()
+				return m, tea.Batch(m.filePicker.Init())
+			} else {
+				m.inputComponentMode = InputComponentText
+				m.textInput.Focus()
+			}
+		}
+		return m, nil
+
+	case "enter":
+		// Handle different component modes
+		if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
+			// Handle file picker selection
+			if selected, path := m.filePicker.DidSelectFile(msg); selected {
+				// Get selected file path and process upload
+				m.showInput = false
+				m.inputMode = InputModeNone
+				m.inputComponentMode = InputComponentText
+				return m.processUploadWithPath(path)
+			}
+		} else {
+			// Handle text input
+			switch m.inputMode {
+			case InputModeSearch:
+				return m.processSearchInput()
+			case InputModeUpload:
+				return m.processUploadInput()
+			}
+		}
+		m.showInput = false
+		m.inputMode = InputModeNone
+		m.inputComponentMode = InputComponentText
+		return m, nil
+	}
+
+	// Handle component-specific inputs
+	var cmd tea.Cmd
+	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
+		// Update file picker
+		m.filePicker, cmd = m.filePicker.Update(msg)
+	} else {
+		// Update text input
+		m.textInput, cmd = m.textInput.Update(msg)
+	}
+
+	return m, cmd
+}
+
+// processSearchInput processes search input
+func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
+	m.showInput = false
+	m.inputMode = InputModeNone
+	
+	// If input is empty, clear search and restore original files
+	if strings.TrimSpace(m.textInput.Value()) == "" {
+		m.clearSearch()
+		m.setMessage("Search cleared", MessageInfo)
+		return m, m.loadFiles()
+	}
+	
+	m.searchQuery = strings.TrimSpace(m.textInput.Value())
+	m.isSearchMode = true
+	m.textInput.SetValue("")
+	m.textInput.Blur()
+	
+	// Reset pagination for new search
+	m.currentPage = 1
+	m.continuationToken = ""
+	m.estimatedTotalPages = 1
+	m.cursor = 0
+	
+	// Start loading with search query
+	m.loading = true
+	m.setMessage(fmt.Sprintf("Searching for '%s'...", m.searchQuery), MessageInfo)
+	return m, m.loadFiles()
+}
+
+// processUploadInput processes upload input
+func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
+	m.showInput = false
+	m.inputMode = InputModeNone
+	
+	filePath := strings.TrimSpace(m.textInput.Value())
+	m.textInput.SetValue("")
+	m.textInput.Blur()
+	
+	if filePath == "" {
+		m.setMessage("No file path provided", MessageError)
+		return m, nil
+	}
+	
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
+		return m, nil
+	} else if err != nil {
+		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
+		return m, nil
+	}
+	
+	// Start upload process
+	m.uploading = true
+	m.uploadingFile = filepath.Base(filePath)
+	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
+	
+	// Return command to start upload
+	return m, m.uploadFile(filePath)
+}
+
+// processUploadWithPath processes upload with file picker selected path
+func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, tea.Cmd) {
+	if filePath == "" {
+		m.setMessage("No file selected", MessageError)
+		return m, nil
+	}
+	
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
+		return m, nil
+	} else if err != nil {
+		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
+		return m, nil
+	}
+	
+	// Start upload process
+	m.uploading = true
+	m.uploadingFile = filepath.Base(filePath)
+	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
+	
+	// Return command to start upload
+	return m, m.uploadFile(filePath)
+}
+
+// clearSearch clears search mode and reloads files without search
+func (m *FileBrowserModel) clearSearch() {
+	m.isSearchMode = false
+	m.searchQuery = ""
+	m.currentPage = 1
+	m.continuationToken = ""
+	m.estimatedTotalPages = 1
+	m.cursor = 0
+	m.loading = true
+}
+
+// setMessage sets a status message with type
+func (m *FileBrowserModel) setMessage(message string, msgType MessageType) {
+	m.statusMessage = message
+	m.messageType = msgType
+	m.messageTimer = time.Now()
+}
+
+// clearMessage clears the status message
+func (m *FileBrowserModel) clearMessage() {
+	m.statusMessage = ""
+}
+
+// uploadFile uploads a file (placeholder for now)
+func (m *FileBrowserModel) uploadFile(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// TODO: Implement actual upload logic
+		// For now, just simulate success
+		time.Sleep(1 * time.Second)
+		return uploadCompletedMsg{file: filepath.Base(filePath), err: nil}
+	}
+}
+
+// updateFileTable updates the file table with current files
+func (m *FileBrowserModel) updateFileTable() {
+	m.updateTable()
+}
+
+// uploadCompletedMsg represents upload completion
+type uploadCompletedMsg struct {
+	file string
+	err  error
 }
