@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -15,17 +16,21 @@ type Config struct {
 	General GeneralConfig `mapstructure:"general"`
 	Upload  UploadConfig  `mapstructure:"upload"`
 	UI      UIConfig      `mapstructure:"ui"`
+	
+	// Runtime state (not persisted in config file)
+	TempBucket string    // Temporary bucket for current session
+	UserData   *UserData // User data loaded from user.data file
 }
 
 // R2Config holds R2/S3 specific configuration
 type R2Config struct {
-	AccountID       string   `mapstructure:"account_id"`
-	AccessKeyID     string   `mapstructure:"access_key_id"`
-	AccessKeySecret string   `mapstructure:"access_key_secret"`
-	BucketName      string   `mapstructure:"bucket_name"`
-	Endpoint        string   `mapstructure:"endpoint"`
-	Region          string   `mapstructure:"region"`
-	CustomDomains   []string `mapstructure:"custom_domains"`
+	AccountID       string                `mapstructure:"account_id"`
+	AccessKeyID     string                `mapstructure:"access_key_id"`
+	AccessKeySecret string                `mapstructure:"access_key_secret"`
+	BucketName      string                `mapstructure:"bucket_name"`
+	Endpoint        string                `mapstructure:"endpoint"`
+	Region          string                `mapstructure:"region"`
+	CustomDomains   map[string]string     `mapstructure:"custom_domains"` // bucket -> domain mapping
 }
 
 // LogConfig holds logging configuration
@@ -115,6 +120,14 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Load user data
+	userData, err := LoadUserData()
+	if err != nil {
+		// Non-fatal error, continue with default user data
+		userData = &UserData{}
+	}
+	config.UserData = userData
+
 	// Validate configuration
 	if err := Validate(&config); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -162,4 +175,87 @@ func EnsureConfigDir() error {
 	configPath := GetDefaultConfigPath()
 	dir := filepath.Dir(configPath)
 	return os.MkdirAll(dir, 0700)
+}
+
+// GetEffectiveBucket returns the current effective bucket based on priority:
+// 1. TempBucket (highest - session level)
+// 2. UserData.LastUsed (recently selected bucket)
+// 3. UserData.MainBucket (user preference)
+// 4. R2.BucketName (config file default)
+func (c *Config) GetEffectiveBucket() string {
+	var result string
+	var source string
+	
+	if c.TempBucket != "" {
+		result = c.TempBucket
+		source = "TempBucket"
+	} else if c.UserData != nil {
+		if c.UserData.LastUsed != "" {
+			result = c.UserData.LastUsed
+			source = "LastUsed"
+		} else if c.UserData.MainBucket != "" {
+			result = c.UserData.MainBucket
+			source = "MainBucket"
+		} else {
+			result = c.R2.BucketName
+			source = "config default"
+		}
+	} else {
+		result = c.R2.BucketName
+		source = "config default (UserData nil)"
+	}
+	
+	// Log bucket selection (reduced frequency)
+	logrus.Debugf("GetEffectiveBucket: using %s: %s", source, result)
+	
+	return result
+}
+
+// SetTempBucket sets the temporary bucket for the current session
+// This also saves the bucket as LastUsed to persist across commands
+func (c *Config) SetTempBucket(bucket string) {
+	c.TempBucket = bucket
+	
+	// Save as last used so it persists across command invocations
+	if c.UserData != nil {
+		c.UserData.SetLastUsed(bucket)
+	}
+}
+
+// SetMainBucket sets the main bucket in user data and saves it
+func (c *Config) SetMainBucket(bucket string) error {
+	if c.UserData == nil {
+		c.UserData = &UserData{}
+	}
+	
+	return c.UserData.SetMainBucket(bucket)
+}
+
+// GetMainBucket returns the current main bucket from user data
+func (c *Config) GetMainBucket() string {
+	if c.UserData != nil {
+		return c.UserData.MainBucket
+	}
+	return ""
+}
+
+// IsMainBucket checks if the given bucket is the current main bucket
+func (c *Config) IsMainBucket(bucket string) bool {
+	return c.GetMainBucket() == bucket
+}
+
+// GetCustomDomain returns the custom domain for a specific bucket
+func (c *Config) GetCustomDomain(bucket string) string {
+	if c.R2.CustomDomains == nil {
+		return ""
+	}
+	return c.R2.CustomDomains[bucket]
+}
+
+// SetCustomDomain sets a custom domain for a specific bucket
+func (c *Config) SetCustomDomain(bucket, domain string) {
+	if c.R2.CustomDomains == nil {
+		c.R2.CustomDomains = make(map[string]string)
+	}
+	c.R2.CustomDomains[bucket] = domain
 }

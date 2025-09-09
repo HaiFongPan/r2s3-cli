@@ -51,8 +51,8 @@ func deleteFile(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create R2 client: %w", err)
 	}
 
-	// Determine bucket name
-	bucketName := client.GetBucketName()
+	// Determine bucket name with priority: --bucket flag > effective bucket from config
+	bucketName := cfg.GetEffectiveBucket()
 	if deleteBucket != "" {
 		bucketName = deleteBucket
 	}

@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/r2"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -29,9 +32,14 @@ Example usage:
   r2s3-cli upload image.jpg
   r2s3-cli list photos/
   r2s3-cli delete old-file.jpg
-  r2s3-cli preview image.jpg --url`,
+  r2s3-cli preview image.jpg --url
+  r2s3-cli                    # Interactive file browser`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// When called without subcommands, directly enter interactive file browser
+		return runDefaultInteractiveList()
 	},
 }
 
@@ -110,4 +118,35 @@ func setupLogging() {
 // GetConfig returns the global configuration
 func GetConfig() *config.Config {
 	return globalConfig
+}
+
+// runDefaultInteractiveList runs the interactive file browser with default settings
+func runDefaultInteractiveList() error {
+	cfg := globalConfig
+	
+	// Create R2 client
+	client, err := r2.NewClient(&cfg.R2)
+	if err != nil {
+		return fmt.Errorf("failed to create R2 client: %w", err)
+	}
+
+	// Get effective bucket and empty prefix for default list
+	effectiveBucket := cfg.GetEffectiveBucket()
+	prefix := ""
+	
+	// Create model
+	model := tui.NewFileBrowserModel(client, cfg, effectiveBucket, prefix)
+
+	// Launch interactive browser with bubbletea
+	program := tea.NewProgram(
+		model,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+
+	// Set program reference in model for direct messaging
+	model.SetProgram(program)
+
+	_, err = program.Run()
+	return err
 }

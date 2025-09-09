@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -23,7 +22,6 @@ import (
 var (
 	listBucket      string
 	listLimit       int64
-	listFormat      string
 	showSize        bool
 	showDate        bool
 	listInteractive bool
@@ -34,14 +32,13 @@ var listCmd = &cobra.Command{
 	Use:   "list [prefix]",
 	Short: "List files in the R2 bucket",
 	Long: `List files in the specified R2 bucket with optional prefix filtering.
+By default, launches interactive TUI browser. Use --interactive=false for table output.
 
 Examples:
-  r2s3-cli list                    # List all files
-  r2s3-cli list photos/            # List files with 'photos/' prefix
-  r2s3-cli list --format json     # Output in JSON format
-  r2s3-cli list --size --date      # Show file sizes and dates
-  r2s3-cli list --interactive      # Launch interactive browser
-  r2s3-cli list --interactive=false # Force non-interactive mode`,
+  r2s3-cli list                    # Launch interactive browser
+  r2s3-cli list photos/            # Browse files with 'photos/' prefix  
+  r2s3-cli list --interactive=false # Show table output
+  r2s3-cli list --size --date      # Show file sizes and dates (table mode)`,
 	RunE: listFiles,
 }
 
@@ -50,7 +47,6 @@ func init() {
 
 	listCmd.Flags().StringVarP(&listBucket, "bucket", "b", "", "bucket name (overrides config)")
 	listCmd.Flags().Int64VarP(&listLimit, "limit", "l", 1000, "maximum number of files to list")
-	listCmd.Flags().StringVarP(&listFormat, "format", "f", "table", "output format (table, json)")
 	listCmd.Flags().BoolVar(&showSize, "size", true, "show file sizes")
 	listCmd.Flags().BoolVar(&showDate, "date", true, "show modification dates")
 	listCmd.Flags().BoolVarP(&listInteractive, "interactive", "i", false, "launch interactive browser")
@@ -59,8 +55,8 @@ func init() {
 func listFiles(cmd *cobra.Command, args []string) error {
 	cfg := GetConfig()
 
-	// Determine bucket name
-	bucketName := cfg.R2.BucketName
+	// Determine bucket name with priority: --bucket flag > effective bucket from config
+	bucketName := cfg.GetEffectiveBucket()
 	if listBucket != "" {
 		bucketName = listBucket
 	}
@@ -96,8 +92,11 @@ func listFiles(cmd *cobra.Command, args []string) error {
 }
 
 func runInteractiveBrowser(client *r2.Client, cfg *config.Config, bucketName, prefix string) error {
+	// Use the effective bucket from config (which includes any temp bucket changes)
+	effectiveBucket := cfg.GetEffectiveBucket()
+	
 	// Create model
-	model := tui.NewFileBrowserModel(client, cfg, bucketName, prefix)
+	model := tui.NewFileBrowserModel(client, cfg, effectiveBucket, prefix)
 	
 	// Launch interactive browser with bubbletea
 	program := tea.NewProgram(
@@ -132,19 +131,8 @@ func runNonInteractiveList(client *r2.Client, bucketName, prefix string) error {
 		return fmt.Errorf("failed to list objects: %w", err)
 	}
 
-	// Output results
-	switch listFormat {
-	case "json":
-		return outputJSON(result.Contents)
-	default:
-		return outputTable(result.Contents)
-	}
-}
-
-func outputJSON(objects []types.Object) error {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(objects)
+	// Output results in table format
+	return outputTable(result.Contents)
 }
 
 func outputTable(objects []types.Object) error {

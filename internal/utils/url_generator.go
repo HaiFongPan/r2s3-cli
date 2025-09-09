@@ -17,11 +17,11 @@ import (
 
 type URLGenerator struct {
 	s3Client   *s3.Client
-	config     *config.R2Config
+	config     *config.Config
 	bucketName string
 }
 
-func NewURLGenerator(s3Client *s3.Client, cfg *config.R2Config, bucketName string) *URLGenerator {
+func NewURLGenerator(s3Client *s3.Client, cfg *config.Config, bucketName string) *URLGenerator {
 	return &URLGenerator{
 		s3Client:   s3Client,
 		config:     cfg,
@@ -29,9 +29,16 @@ func NewURLGenerator(s3Client *s3.Client, cfg *config.R2Config, bucketName strin
 	}
 }
 
+// SetBucketName updates the bucket name for URL generation
+func (g *URLGenerator) SetBucketName(bucketName string) {
+	logrus.Tracef("URLGenerator.SetBucketName: updating bucket from %s to %s", g.bucketName, bucketName)
+	g.bucketName = bucketName
+}
+
 func (g *URLGenerator) GenerateFileURL(key string) (customURL string, presignedURL string, err error) {
-	// Generate custom domain URL if configured
-	if len(g.config.CustomDomains) > 0 {
+	// Generate custom domain URL if configured for this bucket
+	customDomain := g.config.GetCustomDomain(g.bucketName)
+	if customDomain != "" {
 		customURL = g.GenerateCustomDomainURL(key)
 	}
 
@@ -46,13 +53,13 @@ func (g *URLGenerator) GenerateFileURL(key string) (customURL string, presignedU
 }
 
 func (g *URLGenerator) GenerateCustomDomainURL(key string) string {
-	if len(g.config.CustomDomains) == 0 {
+	// Get custom domain for this bucket
+	domain := g.config.GetCustomDomain(g.bucketName)
+	logrus.Tracef("URLGenerator.GenerateCustomDomainURL: bucket=%s, domain=%s", g.bucketName, domain)
+	if domain == "" {
 		return ""
 	}
 
-	// Use the first configured custom domain
-	domain := g.config.CustomDomains[0]
-	
 	// Clean up domain (remove protocol if present)
 	domain = strings.TrimPrefix(domain, "https://")
 	domain = strings.TrimPrefix(domain, "http://")
@@ -74,7 +81,6 @@ func (g *URLGenerator) GeneratePresignedURL(key string) (string, error) {
 	}, func(opts *s3.PresignOptions) {
 		opts.Expires = time.Hour
 	})
-
 	if err != nil {
 		return "", fmt.Errorf("failed to presign request: %w", err)
 	}
@@ -103,11 +109,11 @@ func (g *URLGenerator) GenerateAllURLs(key string) (map[string]string, error) {
 	}
 
 	urls := make(map[string]string)
-	
+
 	if customURL != "" {
 		urls["Custom Domain"] = customURL
 	}
-	
+
 	if presignedURL != "" {
 		urls["Presigned URL"] = presignedURL
 	}

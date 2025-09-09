@@ -1,0 +1,46 @@
+# R2S3-CLI Configuration File
+# Copy this file to ~/.r2s3-cli/config.toml or use with --config flag
+
+[r2]
+# Your Cloudflare R2 account ID (required)
+account_id = "your-account-id-here"
+
+# R2 API credentials (required)
+access_key_id = "your-access-key-id-here"
+access_key_secret = "your-secret-access-key-here"
+
+# Default bucket name (required)
+bucket_name = "your-bucket-name"
+
+# R2 endpoint (leave as "auto" for Cloudflare R2)
+endpoint = "auto"
+
+# R2 region (leave as "auto" for Cloudflare R2)
+region = "auto"
+
+# Custom domains for your R2 buckets (optional)
+# Used to generate direct URLs to your files
+# Map bucket names to their custom domains
+# Example: custom_domains = { "my-bucket" = "cdn.example.com", "images-bucket" = "images.example.com" }
+custom_domains = {}
+
+[log]
+# Log level: debug, info, warn, error
+level = "info"
+
+# Log format: text or json
+format = "text"
+
+[ui]
+# Enable interactive TUI mode by default for list command
+interactive_mode = true
+
+# Image preview in terminal: auto, kitty, iterm2, ascii, none
+image_preview_method = "auto"
+
+[upload]
+# Default behavior for file overwrite
+default_overwrite = false
+
+# Automatically detect content type from file extension
+auto_detect_content_type = true

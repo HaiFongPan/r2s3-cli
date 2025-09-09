@@ -137,3 +137,113 @@ func formatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f%cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
+
+// MultiFileProgress tracks progress for multiple file uploads
+type MultiFileProgress struct {
+	totalFiles     int
+	currentFile    int
+	totalBytes     int64
+	processedBytes int64
+	currentFileName string
+	startTime      time.Time
+	lastPrint      time.Time
+	lastLineLen    int
+}
+
+// NewMultiFileProgress creates a new multi-file progress tracker
+func NewMultiFileProgress(totalFiles int, totalBytes int64) *MultiFileProgress {
+	return &MultiFileProgress{
+		totalFiles: totalFiles,
+		totalBytes: totalBytes,
+		startTime:  time.Now(),
+		lastPrint:  time.Now(),
+	}
+}
+
+// StartFile marks the start of a new file upload
+func (mfp *MultiFileProgress) StartFile(fileName string, fileSize int64) {
+	mfp.currentFile++
+	mfp.currentFileName = fileName
+	mfp.printProgress()
+}
+
+// FinishFile marks the completion of a file upload
+func (mfp *MultiFileProgress) FinishFile(fileSize int64) {
+	mfp.processedBytes += fileSize
+	mfp.printProgress()
+}
+
+// printProgress displays the current multi-file progress
+func (mfp *MultiFileProgress) printProgress() {
+	if mfp.totalFiles <= 0 {
+		return
+	}
+
+	// Calculate file progress percentage
+	filePercentage := float64(mfp.currentFile) / float64(mfp.totalFiles) * 100
+	
+	// Calculate byte progress percentage (if we have total bytes)
+	var bytePercentage float64
+	var byteInfo string
+	if mfp.totalBytes > 0 {
+		bytePercentage = float64(mfp.processedBytes) / float64(mfp.totalBytes) * 100
+		byteInfo = fmt.Sprintf(" (%s/%s)", formatBytes(mfp.processedBytes), formatBytes(mfp.totalBytes))
+	}
+
+	// Calculate transfer speed
+	elapsed := time.Since(mfp.startTime)
+	var speed string
+	if elapsed.Seconds() > 1 && mfp.processedBytes > 0 {
+		bytesPerSec := float64(mfp.processedBytes) / elapsed.Seconds()
+		speed = fmt.Sprintf(" %s/s", formatBytes(int64(bytesPerSec)))
+	}
+
+	// Create progress bar (30 characters wide)
+	barWidth := 30
+	var filled int
+	if mfp.totalBytes > 0 {
+		filled = int(bytePercentage * float64(barWidth) / 100)
+	} else {
+		filled = int(filePercentage * float64(barWidth) / 100)
+	}
+	if filled > barWidth {
+		filled = barWidth
+	}
+
+	bar := "[" + strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled) + "]"
+
+	// Build the progress line
+	var line string
+	if mfp.totalBytes > 0 {
+		line = fmt.Sprintf("[%d/%d] %s %.1f%%%s%s - %s",
+			mfp.currentFile,
+			mfp.totalFiles,
+			bar,
+			bytePercentage,
+			byteInfo,
+			speed,
+			mfp.currentFileName)
+	} else {
+		line = fmt.Sprintf("[%d/%d] %s %.1f%% - %s",
+			mfp.currentFile,
+			mfp.totalFiles,
+			bar,
+			filePercentage,
+			mfp.currentFileName)
+	}
+
+	// Clear previous line if it was longer
+	if mfp.lastLineLen > len(line) {
+		fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", mfp.lastLineLen))
+	}
+
+	// Print the new progress line
+	fmt.Fprintf(os.Stderr, "\r%s", line)
+	mfp.lastLineLen = len(line)
+}
+
+// Finish completes the multi-file progress display
+func (mfp *MultiFileProgress) Finish() {
+	mfp.printProgress()
+	fmt.Fprintln(os.Stderr) // New line after completion
+}

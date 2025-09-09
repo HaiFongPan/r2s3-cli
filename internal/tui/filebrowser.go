@@ -35,20 +35,21 @@ type FileItem struct {
 
 // KeyMap defines keybindings for the file browser
 type KeyMap struct {
-	Up       key.Binding
-	Down     key.Binding
-	PageUp   key.Binding
-	PageDown key.Binding
-	Home     key.Binding
-	End      key.Binding
-	Refresh  key.Binding
-	Delete   key.Binding
-	Download key.Binding
-	Preview  key.Binding
-	Help     key.Binding
-	Quit     key.Binding
-	Confirm  key.Binding
-	Cancel   key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	PageUp       key.Binding
+	PageDown     key.Binding
+	Home         key.Binding
+	End          key.Binding
+	Refresh      key.Binding
+	Delete       key.Binding
+	Download     key.Binding
+	Preview      key.Binding
+	ChangeBucket key.Binding
+	Help         key.Binding
+	Quit         key.Binding
+	Confirm      key.Binding
+	Cancel       key.Binding
 }
 
 // DefaultKeyMap returns default keybindings
@@ -94,6 +95,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("p"),
 			key.WithHelp("p", "preview URL"),
 		),
+		ChangeBucket: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "change bucket"),
+		),
 		Help: key.NewBinding(
 			key.WithKeys("?", "h"),
 			key.WithHelp("?/h", "help"),
@@ -115,7 +120,7 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to be shown in the mini help view
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Quit}
+	return []key.Binding{k.ChangeBucket, k.Help, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view
@@ -124,7 +129,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Home, k.End, k.Refresh},
 		{k.Download, k.Preview, k.Delete},
-		{k.Help, k.Quit},
+		{k.ChangeBucket, k.Help, k.Quit},
 	}
 }
 
@@ -159,11 +164,15 @@ type FileBrowserModel struct {
 	spinner          spinner.Model
 	helpViewport     viewport.Model
 	program          *tea.Program
+
+	// Bucket selector overlay
+	showingBucketSelector bool
+	bucketSelector        *BucketSelectorModel
 }
 
 // NewFileBrowserModel creates a new file browser model
 func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, prefix string) *FileBrowserModel {
-	urlGenerator := utils.NewURLGenerator(client.GetS3Client(), &cfg.R2, bucketName)
+	urlGenerator := utils.NewURLGenerator(client.GetS3Client(), cfg, bucketName)
 	fileDownloader := utils.NewFileDownloader(client.GetS3Client(), bucketName)
 
 	// Initialize table with proper column configuration
@@ -222,11 +231,11 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		windowHeight:   24,
 		urlGenerator:   urlGenerator,
 		fileDownloader: fileDownloader,
-		fileTable:    t,
-		keyMap:       DefaultKeyMap(),
-		help:         h,
-		spinner:      s,
-		helpViewport: vp,
+		fileTable:      t,
+		keyMap:         DefaultKeyMap(),
+		help:           h,
+		spinner:        s,
+		helpViewport:   vp,
 	}
 }
 
@@ -242,8 +251,36 @@ func (m *FileBrowserModel) Init() tea.Cmd {
 
 // Update implements the bubbletea.Model interface
 func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If bucket selector is showing, forward non-key messages to it first
+	if m.showingBucketSelector && m.bucketSelector != nil {
+		if _, isKeyMsg := msg.(tea.KeyMsg); !isKeyMsg {
+			selectorModel, cmd := m.bucketSelector.Update(msg)
+			if selectorModel != nil {
+				m.bucketSelector = selectorModel.(*BucketSelectorModel)
+			}
+			// If bucket selector has a command, execute it and also process the message in file browser
+			if cmd != nil {
+				return m, cmd
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// If bucket selector is showing, handle its keys
+		if m.showingBucketSelector && m.bucketSelector != nil {
+			// Check for ESC key to close bucket selector
+			if msg.String() == "esc" || msg.String() == "q" {
+				return m, func() tea.Msg { return bucketSelectorClosedMsg{} }
+			}
+			// Forward other keys to bucket selector
+			selectorModel, cmd := m.bucketSelector.Update(msg)
+			if selectorModel != nil {
+				m.bucketSelector = selectorModel.(*BucketSelectorModel)
+			}
+			return m, cmd
+		}
+
 		if m.confirmDelete {
 			return m.handleDeleteConfirmation(msg)
 		}
@@ -274,6 +311,42 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.infoMessage = fmt.Sprintf("Failed to generate preview URL: %v", msg.err)
 		} else {
 			m.previewURL = msg.url
+		}
+		return m, nil
+
+	case bucketSelectorClosedMsg:
+		// Handle bucket selector being closed without selection
+		m.showingBucketSelector = false
+		m.bucketSelector = nil
+		return m, nil
+
+	case bucketSwitchedMsg:
+		// Handle bucket switch from bucket selector
+		m.bucketName = msg.bucket
+
+		// Update URLGenerator and FileDownloader with new bucket
+		m.urlGenerator.SetBucketName(msg.bucket)
+		m.fileDownloader.SetBucketName(msg.bucket)
+
+		m.showingBucketSelector = false
+		m.bucketSelector = nil
+		m.loading = true
+		return m, m.loadFiles()
+
+	case mainBucketSetMsg:
+		// Handle main bucket being set from bucket selector
+		if msg.err == nil {
+			// Switch to the main bucket and reload files
+			m.bucketName = msg.bucket
+
+			// Update URLGenerator and FileDownloader with new bucket
+			m.urlGenerator.SetBucketName(msg.bucket)
+			m.fileDownloader.SetBucketName(msg.bucket)
+
+			m.showingBucketSelector = false
+			m.bucketSelector = nil
+			m.loading = true
+			return m, m.loadFiles()
 		}
 		return m, nil
 
@@ -448,6 +521,12 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.deleteTarget = m.files[m.cursor].Key
 		}
 
+	case key.Matches(msg, m.keyMap.ChangeBucket):
+		if m.downloading {
+			return m, nil
+		}
+		return m, m.openBucketSelector()
+
 	case key.Matches(msg, m.keyMap.Refresh):
 		if m.downloading {
 			return m, nil
@@ -567,6 +646,10 @@ func (m *FileBrowserModel) View() string {
 		return m.renderFloatingDialog(baseView, m.renderHelpDialog())
 	}
 
+	if m.showingBucketSelector && m.bucketSelector != nil {
+		return m.renderFloatingDialog(baseView, m.bucketSelector.View())
+	}
+
 	return baseView
 }
 
@@ -642,8 +725,8 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		b.WriteString("\n\n")
 
 		// Custom domain URL if configured
-		if len(m.config.R2.CustomDomains) > 0 {
-			customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
+		customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
+		if customURL != "" {
 			urlStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#00FF00"))
 
@@ -891,6 +974,8 @@ type previewURLGeneratedMsg struct {
 	err error
 }
 
+type bucketSelectorClosedMsg struct{}
+
 // loadFiles loads files from R2
 func (m *FileBrowserModel) loadFiles() tea.Cmd {
 	return func() tea.Msg {
@@ -1029,13 +1114,6 @@ func min(a, b int) int {
 	return b
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // updateRightPanel updates right panel information for current file
 func (m *FileBrowserModel) updateRightPanel() {
 	// Clear previous preview URL when navigating
@@ -1114,14 +1192,6 @@ func (m *FileBrowserModel) generatePreviewURL(key string) tea.Cmd {
 	}
 }
 
-// downloadFile downloads a file to the local system
-func (m *FileBrowserModel) downloadFile(key string) tea.Cmd {
-	return func() tea.Msg {
-		err := m.fileDownloader.DownloadFile(key)
-		return utils.DownloadCompletedMsg{Err: err}
-	}
-}
-
 // downloadFileWithProgress downloads a file with progress updates
 func (m *FileBrowserModel) downloadFileWithProgress(key string) tea.Cmd {
 	return func() tea.Msg {
@@ -1151,4 +1221,18 @@ func (m *FileBrowserModel) downloadFileWithProgress(key string) tea.Cmd {
 		// Return started message immediately for synchronous handling
 		return utils.DownloadStartedMsg{Filename: filepath.Base(key)}
 	}
+}
+
+// openBucketSelector opens the bucket selector as an overlay
+func (m *FileBrowserModel) openBucketSelector() tea.Cmd {
+	// Create bucket selector model
+	m.bucketSelector = NewBucketSelectorModel(m.client, m.config)
+	m.showingBucketSelector = true
+
+	// Send window size to bucket selector and start loading
+	windowSizeMsg := tea.WindowSizeMsg{Width: m.windowWidth, Height: m.windowHeight}
+	m.bucketSelector.Update(windowSizeMsg)
+
+	// Return command to load buckets
+	return m.bucketSelector.Init()
 }
