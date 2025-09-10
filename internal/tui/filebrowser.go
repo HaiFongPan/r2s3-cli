@@ -58,6 +58,8 @@ type KeyMap struct {
 	Quit         key.Binding
 	Confirm      key.Binding
 	Cancel       key.Binding
+	CopyCustom   key.Binding
+	CopyPresign  key.Binding
 }
 
 // DefaultKeyMap returns default keybindings
@@ -143,6 +145,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("n"),
 			key.WithHelp("n", "no"),
 		),
+		CopyCustom: key.NewBinding(
+			key.WithKeys("ctrl+o"),
+			key.WithHelp("ctrl+o", "copy custom URL"),
+		),
+		CopyPresign: key.NewBinding(
+			key.WithKeys("ctrl+y"),
+			key.WithHelp("ctrl+y", "copy presigned URL"),
+		),
 	}
 }
 
@@ -158,6 +168,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Home, k.End, k.Refresh},
 		{k.Download, k.Preview, k.Delete},
 		{k.Search, k.Upload, k.ClearSearch},
+		{k.CopyCustom, k.CopyPresign},
 		{k.ChangeBucket},
 		{k.NextPage, k.PrevPage},
 		{k.Help, k.Quit},
@@ -638,6 +649,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = ""   // Clear info message on navigation
+		m.clearMessage()     // Clear status message on navigation
 		m.updateRightPanel() // Update right panel on navigation
 		return m, cmd
 
@@ -649,6 +661,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = ""   // Clear info message on navigation
+		m.clearMessage()     // Clear status message on navigation
 		m.updateRightPanel() // Update right panel on navigation
 		return m, cmd
 
@@ -800,9 +813,34 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.infoMessage = "" // Clear info message on refresh
 		return m, m.loadFiles()
 
+	case key.Matches(msg, m.keyMap.CopyCustom):
+		if len(m.files) > 0 && m.fileTable.Cursor() < len(m.files) {
+			file := m.files[m.fileTable.Cursor()]
+			customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
+			if customURL != "" {
+				utils.CopyToClipboard(customURL)
+				m.setMessage("Custom URL copied to clipboard", MessageInfo)
+			} else {
+				m.setMessage("No custom domain configured for this bucket", MessageError)
+			}
+		}
+
+	case key.Matches(msg, m.keyMap.CopyPresign):
+		if len(m.files) > 0 && m.fileTable.Cursor() < len(m.files) {
+			file := m.files[m.fileTable.Cursor()]
+			_, presignedURL, err := m.urlGenerator.GenerateFileURL(file.Key)
+			if err != nil {
+				m.setMessage(fmt.Sprintf("Failed to generate presigned URL: %s", err), MessageError)
+			} else {
+				utils.CopyToClipboard(presignedURL)
+				m.setMessage("Presigned URL copied to clipboard", MessageInfo)
+			}
+		}
+
 	case key.Matches(msg, m.keyMap.Help):
-		m.help.ShowAll = !m.help.ShowAll
+		logrus.Debugf("Help key pressed - before: ShowAll=%v, showHelp=%v", m.help.ShowAll, m.showHelp)
 		m.showHelp = !m.showHelp
+		logrus.Debugf("Help key pressed - after: ShowAll=%v, showHelp=%v", m.help.ShowAll, m.showHelp)
 		if m.showHelp {
 			m.setupHelpViewport()
 		}
@@ -892,15 +930,20 @@ func (m *FileBrowserModel) View() string {
 
 	// Footer with help and status messages
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#808080")).
+		Foreground(lipgloss.Color("#CCCCCC")).
 		MarginTop(1)
 
-	// Use bubbles help component for footer
+	// Use bubbles help component for footer (always show short help)
 	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
+	logrus.Debugf("Help footer debug - ShowAll: %v, helpLine length: %d, content: '%s'", 
+		m.help.ShowAll, len(helpLine), helpLine)
 
 	// Add status message if present
 	var footerContent string
-	if m.statusMessage != "" && time.Since(m.messageTimer) < 5*time.Second {
+	hasMessage := m.statusMessage != ""
+	logrus.Debugf("Message debug - hasMessage: %v, message: '%s'", hasMessage, m.statusMessage)
+		
+	if hasMessage {
 		// Create status message with appropriate color
 		var messageColor string
 		var messageIcon string
@@ -925,15 +968,14 @@ func (m *FileBrowserModel) View() string {
 
 		messageLine := messageStyle.Render(fmt.Sprintf("%s %s", messageIcon, m.statusMessage))
 		footerContent = lipgloss.JoinVertical(lipgloss.Left, helpLine, messageLine)
+		logrus.Debugf("Footer content debug - showing help + message, final length: %d", len(footerContent))
 	} else {
-		// Clear expired message
-		if m.statusMessage != "" && time.Since(m.messageTimer) >= 5*time.Second {
-			m.clearMessage()
-		}
 		footerContent = helpLine
+		logrus.Debugf("Footer content debug - showing help only, final length: %d, content: '%.100s'", len(footerContent), footerContent)
 	}
 
 	footerLine := footerStyle.Render(footerContent)
+	logrus.Debugf("Final footer line length: %d", len(footerLine))
 
 	baseView := headerLine + "\n" + content + "\n" + footerLine
 
@@ -966,7 +1008,7 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 	// Handle empty file list
 	if len(m.files) == 0 {
 		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#808080")).
+			Foreground(lipgloss.Color("#CCCCCC")).
 			Width(width).
 			Height(m.viewportHeight).
 			Align(lipgloss.Center).
@@ -983,7 +1025,7 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 	// Add file count info at the bottom if needed
 	if len(m.files) > 0 {
 		countStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#808080")).
+			Foreground(lipgloss.Color("#CCCCCC")).
 			MarginTop(1)
 
 		countInfo := fmt.Sprintf("Total: %d files", len(m.files))
@@ -1063,32 +1105,25 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			b.WriteString(urlStyle.Render("🔗 Custom URL:"))
 			b.WriteString("\n")
 
-			urlBoxStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00BFFF")).
-				Background(lipgloss.Color("#333333")).
-				Padding(0, 1).
-				Margin(0, 1).
-				Underline(true)
-
 			// Make URL clickable with OSC 8 escape sequence
 			clickableURL := m.makeClickableURL(customURL, customURL)
 
-			// Display URL without breaking it (preserve clickability)
-			// Use horizontal scrolling style for very long URLs
-			b.WriteString(urlBoxStyle.Render(clickableURL))
+			// Display URL with direct ANSI codes (avoid lipgloss rendering which breaks OSC 8)
+			// Use ANSI color 51 (bright cyan) and underline, then reset
+			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickableURL)
+			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// // Add raw URL on separate line for easy copying (without styles that might interfere)
-			// rawUrlStyle := lipgloss.NewStyle().
-			// 	Foreground(lipgloss.Color("#666666")).
-			// 	Italic(true)
-			// b.WriteString(rawUrlStyle.Render(fmt.Sprintf("  %s", customURL)))
-			// b.WriteString("\n")
+			// Add raw URL on separate line for easy mouse selection and copying
+			// Use direct ANSI codes to avoid lipgloss interference
+			rawURL := fmt.Sprintf("\033[38;5;242m\033[3m  %s\033[0m", customURL)
+			b.WriteString(rawURL)
+			b.WriteString("\n")
 
 			hintStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#808080")).
+				Foreground(lipgloss.Color("#CCCCCC")).
 				Italic(true)
-			b.WriteString(hintStyle.Render("💡 Tip: Click to open or select and copy"))
+			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy"))
 			b.WriteString("\n\n")
 		}
 
@@ -1100,40 +1135,34 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			b.WriteString(previewStyle.Render("⏱️ Presigned URL:"))
 			b.WriteString("\n")
 
-			urlBoxStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00BFFF")).
-				Background(lipgloss.Color("#333333")).
-				Padding(0, 1).
-				Margin(0, 1).
-				Underline(true)
+			// Use hyperlink format for long URLs - display filename as clickable link
+			filename := filepath.Base(file.Key)
+			linkText := fmt.Sprintf("📥 [点击下载 %s]", filename)
+			clickablePreviewURL := m.makeClickableURL(linkText, m.previewURL)
 
-			// Make URL clickable
-			clickablePreviewURL := m.makeClickableURL(m.previewURL, m.previewURL)
-
-			// Display URL without breaking it (preserve clickability)
-			b.WriteString(urlBoxStyle.Render(clickablePreviewURL))
+			// Display hyperlink with direct ANSI codes (avoid lipgloss rendering which breaks OSC 8)
+			// Use ANSI color 51 (bright cyan) and underline, then reset
+			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickablePreviewURL)
+			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// Add raw URL on separate line for easy copying (without styles that might interfere)
-			// rawUrlStyle := lipgloss.NewStyle().
-			// 	Foreground(lipgloss.Color("#666666")).
-			// 	Italic(true)
-			// b.WriteString(rawUrlStyle.Render(fmt.Sprintf("  %s", m.previewURL)))
-			// b.WriteString("\n")
+			// Add full URL for easy mouse selection and copying
+			// Use direct ANSI codes to avoid lipgloss interference
+			rawURL := fmt.Sprintf("\033[38;5;242m\033[3m  %s\033[0m", m.previewURL)
+			b.WriteString(rawURL)
+			b.WriteString("\n")
 
-			utils.CopyToClipboard(m.previewURL)
 			hintStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#808080")).
+				Foreground(lipgloss.Color("#CCCCCC")).
 				Italic(true)
-			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or copy"))
+			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
 			b.WriteString("\n")
-			m.setMessage("Presigned URL has copyed to your clipboard", MessageInfo)
 		}
 
 	} else {
 		// No file selected
 		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#808080")).
+			Foreground(lipgloss.Color("#CCCCCC")).
 			Align(lipgloss.Center)
 
 		b.WriteString(emptyStyle.Render("Select a file to view details"))
@@ -1209,7 +1238,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 
 	// Show instructions
 	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#808080")).
+		Foreground(lipgloss.Color("#CCCCCC")).
 		Italic(true).
 		Align(lipgloss.Center)
 	b.WriteString(instructionStyle.Render("Press ESC to cancel download"))
@@ -1265,7 +1294,7 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 
 	// Add instructions at the bottom
 	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#808080")).
+		Foreground(lipgloss.Color("#CCCCCC")).
 		Italic(true).
 		Align(lipgloss.Center).
 		MarginTop(1)
@@ -1307,7 +1336,6 @@ func (m *FileBrowserModel) renderInputPopup() string {
 
 	// Create prompt
 	promptStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
 		MarginBottom(1)
 
 	prompt := promptStyle.Render(m.inputPrompt)
@@ -1324,7 +1352,7 @@ func (m *FileBrowserModel) renderInputPopup() string {
 
 	// Create instructions
 	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#808080")).
+		Foreground(lipgloss.Color("#CCCCCC")).
 		Italic(true).
 		Align(lipgloss.Center).
 		MarginTop(1)
@@ -1360,9 +1388,7 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#FFEB3B")).
 		Padding(1).
-		Width(dialogWidth).
-		Background(lipgloss.Color("#1a1a1a")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Width(dialogWidth)
 
 	return dialogStyle.Render(dialogContent)
 }
@@ -1552,7 +1578,7 @@ func (m *FileBrowserModel) makeClickableURL(displayText, url string) string {
 
 // shouldDisableOSC8 checks if OSC 8 support should be disabled
 func (m *FileBrowserModel) shouldDisableOSC8() bool {
-	return true
+	return false
 }
 
 func formatFileSize(bytes int64) string {
@@ -1867,6 +1893,10 @@ func (m *FileBrowserModel) setMessage(message string, msgType MessageType) {
 	m.statusMessage = message
 	m.messageType = msgType
 	m.messageTimer = time.Now()
+	// Debug: ensure message is set
+	if message != "" {
+		logrus.Debugf("Setting message: %s (type: %d)", message, msgType)
+	}
 }
 
 // clearMessage clears the status message
