@@ -93,7 +93,7 @@ func deleteSingleFile(client *r2.Client, bucketName, key string) error {
 	// Delete the file
 	logrus.Infof("Deleting file: %s", key)
 	
-	_, err = client.GetS3Client().DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+	_, err = client.GetS3Client().(*s3.Client).DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
 	})
@@ -108,7 +108,7 @@ func deleteSingleFile(client *r2.Client, bucketName, key string) error {
 
 func deletePrefix(client *r2.Client, bucketName, prefix string) error {
 	// List all files with the prefix
-	s3Client := client.GetS3Client()
+	s3Client := client.GetS3Client().(*s3.Client)
 	
 	listInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),

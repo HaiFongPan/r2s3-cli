@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -266,6 +267,11 @@ type FileBrowserModel struct {
 	uploadProgress progress.Model
 	uploading      bool
 	uploadingFile  string
+	fileUploader   utils.FileUploader
+
+	// Delete state
+	deleting     bool
+	deletingFile string
 }
 
 // createFilePicker creates a properly configured file picker
@@ -287,14 +293,20 @@ func createFilePicker() filepicker.Model {
 	// Allow all file types
 	fp.AllowedTypes = []string{}
 	fp.ShowHidden = false
+	fp.Height = 15 // Set height to show more files
+
+	// Enable directory navigation features
+	fp.DirAllowed = true
+	fp.FileAllowed = true
 
 	return fp
 }
 
 // NewFileBrowserModel creates a new file browser model
 func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, prefix string) *FileBrowserModel {
-	urlGenerator := utils.NewURLGenerator(client.GetS3Client(), cfg, bucketName)
-	fileDownloader := utils.NewFileDownloader(client.GetS3Client(), bucketName)
+	urlGenerator := utils.NewURLGenerator(client.GetS3Client().(*s3.Client), cfg, bucketName)
+	fileDownloader := utils.NewFileDownloader(client.GetS3Client().(*s3.Client), bucketName)
+	fileUploader := utils.NewFileUploader(client, cfg, bucketName)
 
 	// Initialize table with proper column configuration
 	columns := []table.Column{
@@ -352,6 +364,7 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		windowHeight:        24,
 		urlGenerator:        urlGenerator,
 		fileDownloader:      fileDownloader,
+		fileUploader:        fileUploader,
 		fileTable:           t,
 		keyMap:              DefaultKeyMap(),
 		help:                h,
@@ -380,6 +393,10 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		uploadProgress: progress.New(progress.WithDefaultGradient()),
 		uploading:      false,
 		uploadingFile:  "",
+
+		// Delete state
+		deleting:     false,
+		deletingFile: "",
 	}
 
 	// Configure text input
@@ -485,9 +502,12 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deleteCompletedMsg:
 		m.confirmDelete = false
+		m.deleting = false
+		m.deletingFile = ""
 		if msg.err != nil {
-			m.error = msg.err
+			m.setMessage(fmt.Sprintf("Delete failed: %v", msg.err), MessageError)
 		} else {
+			m.setMessage(fmt.Sprintf("File '%s' deleted successfully", m.deleteTarget), MessageSuccess)
 			// Reload files after successful deletion
 			m.loading = true
 			return m, m.loadFiles()
@@ -584,6 +604,14 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case uploadProgressMsg:
+		// Update progress bar
+		if m.uploading {
+			cmd := m.uploadProgress.SetPercent(msg.percentage / 100.0)
+			return m, cmd
+		}
+		return m, nil
+
 	case uploadCompletedMsg:
 		m.uploading = false
 		m.uploadingFile = ""
@@ -591,9 +619,13 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setMessage(fmt.Sprintf("Upload failed: %v", msg.err), MessageError)
 		} else {
 			m.setMessage(fmt.Sprintf("File '%s' uploaded successfully", msg.file), MessageSuccess)
+			// Reset upload state to prevent cached paths
+			m.resetUploadState()
 			// Refresh files to show the new upload
 			return m, m.loadFiles()
 		}
+		// Reset upload state even on failure to clear cached paths
+		m.resetUploadState()
 		return m, nil
 
 	default:
@@ -614,6 +646,18 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle file picker internal messages if showing input with file picker
 		if m.showInput && m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 			filePickerModel, filePickerCmd := m.filePicker.Update(msg)
+
+			// Check if a file was selected
+			if filePickerModel.Path != "" && filePickerModel.Path != m.filePicker.Path {
+				// File was selected, process it
+				m.showInput = false
+				m.inputMode = InputModeNone
+				m.inputComponentMode = InputComponentText
+				selectedPath := filePickerModel.Path
+				m.filePicker = filePickerModel
+				return m.processUploadWithPath(selectedPath)
+			}
+
 			m.filePicker = filePickerModel
 			if filePickerCmd != nil {
 				cmds = append(cmds, filePickerCmd)
@@ -642,8 +686,8 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keyMap.Up):
-		if m.downloading {
-			return m, nil // Block navigation during download
+		if m.downloading || m.deleting {
+			return m, nil // Block navigation during download/delete
 		}
 		var cmd tea.Cmd
 		m.fileTable, cmd = m.fileTable.Update(msg)
@@ -654,8 +698,8 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, cmd
 
 	case key.Matches(msg, m.keyMap.Down):
-		if m.downloading {
-			return m, nil // Block navigation during download
+		if m.downloading || m.deleting {
+			return m, nil // Block navigation during download/delete
 		}
 		var cmd tea.Cmd
 		m.fileTable, cmd = m.fileTable.Update(msg)
@@ -710,8 +754,8 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, cmd
 
 	case key.Matches(msg, m.keyMap.Download):
-		if m.downloading {
-			return m, nil // Block new download during current download
+		if m.downloading || m.deleting {
+			return m, nil // Block new download during current download/delete
 		}
 		if len(m.files) > 0 && m.cursor < len(m.files) {
 			file := m.files[m.cursor]
@@ -719,7 +763,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 
 	case key.Matches(msg, m.keyMap.Preview):
-		if m.downloading {
+		if m.downloading || m.deleting {
 			return m, nil
 		}
 		if len(m.files) > 0 && m.cursor < len(m.files) {
@@ -728,7 +772,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 
 	case key.Matches(msg, m.keyMap.Search):
-		if m.downloading || m.uploading {
+		if m.downloading || m.uploading || m.deleting {
 			return m, nil
 		}
 		m.showInput = true
@@ -741,9 +785,14 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, nil
 
 	case key.Matches(msg, m.keyMap.Upload):
-		if m.downloading || m.uploading {
+		if m.downloading || m.uploading || m.deleting {
 			return m, nil
 		}
+
+		// Ensure clean upload state before starting new upload
+		m.resetUploadState()
+
+		// Set up upload dialog
 		m.showInput = true
 		m.inputMode = InputModeUpload
 		m.inputComponentMode = InputComponentText // Default to text input
@@ -751,6 +800,8 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "Enter file path... (Tab: file picker)"
 		m.textInput.Focus()
+
+		logrus.Info("Starting new upload dialog with clean state")
 		return m, nil
 
 	case key.Matches(msg, m.keyMap.ClearSearch):
@@ -762,7 +813,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, nil
 
 	case key.Matches(msg, m.keyMap.Delete):
-		if m.downloading {
+		if m.downloading || m.deleting {
 			return m, nil
 		}
 		if len(m.files) > 0 && m.cursor < len(m.files) {
@@ -771,13 +822,13 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 
 	case key.Matches(msg, m.keyMap.ChangeBucket):
-		if m.downloading {
+		if m.downloading || m.deleting {
 			return m, nil
 		}
 		return m, m.openBucketSelector()
 
 	case key.Matches(msg, m.keyMap.NextPage):
-		if m.downloading || m.paginationLoading {
+		if m.downloading || m.deleting || m.paginationLoading {
 			return m, nil
 		}
 		if m.hasNextPage {
@@ -788,7 +839,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 
 	case key.Matches(msg, m.keyMap.PrevPage):
-		if m.downloading || m.paginationLoading {
+		if m.downloading || m.deleting || m.paginationLoading {
 			return m, nil
 		}
 		if m.currentPage > 1 {
@@ -802,7 +853,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 
 	case key.Matches(msg, m.keyMap.Refresh):
-		if m.downloading {
+		if m.downloading || m.deleting {
 			return m, nil
 		}
 		m.loading = true
@@ -855,7 +906,9 @@ func (m *FileBrowserModel) handleDeleteConfirmation(msg tea.KeyMsg) (tea.Model, 
 	switch {
 	case key.Matches(msg, m.keyMap.Confirm):
 		m.confirmDelete = false
-		m.infoMessage = fmt.Sprintf("Deleting %s...", m.deleteTarget)
+		m.deleting = true
+		m.deletingFile = filepath.Base(m.deleteTarget)
+		m.setMessage(fmt.Sprintf("Deleting %s...", m.deletingFile), MessageWarning)
 		return m, m.deleteFile(m.deleteTarget)
 
 	case key.Matches(msg, m.keyMap.Cancel) || key.Matches(msg, m.keyMap.Quit):
@@ -864,15 +917,6 @@ func (m *FileBrowserModel) handleDeleteConfirmation(msg tea.KeyMsg) (tea.Model, 
 	}
 
 	return m, nil
-}
-
-// adjustViewport adjusts the viewport to show the cursor
-func (m *FileBrowserModel) adjustViewport() {
-	if m.cursor < m.viewport {
-		m.viewport = m.cursor
-	} else if m.cursor >= m.viewport+m.viewportHeight {
-		m.viewport = m.cursor - m.viewportHeight + 1
-	}
 }
 
 // setupHelpViewport sets up the help viewport with content
@@ -935,14 +979,14 @@ func (m *FileBrowserModel) View() string {
 
 	// Use bubbles help component for footer (always show short help)
 	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
-	logrus.Debugf("Help footer debug - ShowAll: %v, helpLine length: %d, content: '%s'", 
+	logrus.Debugf("Help footer debug - ShowAll: %v, helpLine length: %d, content: '%s'",
 		m.help.ShowAll, len(helpLine), helpLine)
 
 	// Add status message if present
 	var footerContent string
 	hasMessage := m.statusMessage != ""
 	logrus.Debugf("Message debug - hasMessage: %v, message: '%s'", hasMessage, m.statusMessage)
-		
+
 	if hasMessage {
 		// Create status message with appropriate color
 		var messageColor string
@@ -1123,7 +1167,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			hintStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#CCCCCC")).
 				Italic(true)
-			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy"))
+			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
 			b.WriteString("\n\n")
 		}
 
@@ -1379,9 +1423,12 @@ func (m *FileBrowserModel) renderInputPopup() string {
 
 	// Style the dialog container with appropriate size
 	dialogWidth := min(60, m.windowWidth-10)
+	dialogHeight := 0 // Let it auto-size by default
+
 	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 		// Make dialog larger for file picker
 		dialogWidth = min(80, m.windowWidth-5)
+		dialogHeight = min(20, m.windowHeight-10) // Set explicit height for file picker
 	}
 
 	dialogStyle := lipgloss.NewStyle().
@@ -1389,6 +1436,10 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		BorderForeground(lipgloss.Color("#FFEB3B")).
 		Padding(1).
 		Width(dialogWidth)
+
+	if dialogHeight > 0 {
+		dialogStyle = dialogStyle.Height(dialogHeight)
+	}
 
 	return dialogStyle.Render(dialogContent)
 }
@@ -1455,7 +1506,7 @@ func (m *FileBrowserModel) fetchFiles(continuationToken string) ([]FileItem, boo
 }
 
 func (m *FileBrowserModel) fetchFilesWithQuery(continuationToken, searchQuery string) ([]FileItem, bool, string, error) {
-	s3Client := m.client.GetS3Client()
+	s3Client := m.client.GetS3Client().(*s3.Client)
 
 	// Use configured page size
 	pageSize := int32(m.config.UI.PageSize)
@@ -1517,7 +1568,7 @@ func (m *FileBrowserModel) fetchFilesWithQuery(continuationToken, searchQuery st
 // deleteFile deletes a file from R2
 func (m *FileBrowserModel) deleteFile(key string) tea.Cmd {
 	return func() tea.Msg {
-		s3Client := m.client.GetS3Client()
+		s3Client := m.client.GetS3Client().(*s3.Client)
 		_, err := s3Client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 			Bucket: aws.String(m.bucketName),
 			Key:    aws.String(key),
@@ -1728,11 +1779,9 @@ func (m *FileBrowserModel) openBucketSelector() tea.Cmd {
 func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		// Cancel input
-		m.showInput = false
-		m.inputMode = InputModeNone
-		m.textInput.SetValue("")
-		m.textInput.Blur()
+		// Cancel input and reset upload state
+		logrus.Info("Upload dialog cancelled, resetting state")
+		m.resetUploadState()
 		m.clearMessage()
 		return m, nil
 
@@ -1740,14 +1789,23 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		// Switch between text input and file picker (for upload mode only)
 		if m.inputMode == InputModeUpload {
 			if m.inputComponentMode == InputComponentText {
+				// Before switching, update file picker directory based on current text input
+				m.updateFilePickerFromTextInputSync()
+				logrus.Infof("Switching to file picker, current directory: '%s'", m.filePicker.CurrentDirectory)
+
 				m.inputComponentMode = InputComponentFilePicker
 				m.textInput.Blur()
-				// Initialize and focus file picker when switching to it
-				m.filePicker = createFilePicker()
-				return m, tea.Batch(m.filePicker.Init())
+
+				// Reinitialize file picker to refresh its contents without recreating it
+				return m, m.filePicker.Init()
 			} else {
+				logrus.Infof("Switching to text input, file picker path: '%s'", m.filePicker.Path)
 				m.inputComponentMode = InputComponentText
 				m.textInput.Focus()
+				// If a file was selected in picker, update text input with that path
+				if m.filePicker.Path != "" {
+					m.textInput.SetValue(m.filePicker.Path)
+				}
 			}
 		}
 		return m, nil
@@ -1756,13 +1814,33 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		// Handle different component modes
 		if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 			// Handle file picker selection
-			if selected, path := m.filePicker.DidSelectFile(msg); selected {
-				// Get selected file path and process upload
+			oldPath := m.filePicker.Path
+			updatedFilePicker, cmd := m.filePicker.Update(msg)
+			m.filePicker = updatedFilePicker
+
+			logrus.Infof("FilePicker enter key: oldPath='%s', newPath='%s'", oldPath, m.filePicker.Path)
+
+			// Check if a file was selected (path changed or is now set)
+			if m.filePicker.Path != "" && m.filePicker.Path != oldPath {
+				selectedPath := m.filePicker.Path
+				logrus.Infof("File selected in picker: '%s'", selectedPath)
 				m.showInput = false
 				m.inputMode = InputModeNone
 				m.inputComponentMode = InputComponentText
-				return m.processUploadWithPath(path)
+				return m.processUploadWithPath(selectedPath)
 			}
+
+			// Also check if this was a file selection by checking if we have a non-empty path
+			if m.filePicker.Path != "" {
+				selectedPath := m.filePicker.Path
+				logrus.Infof("File path available in picker: '%s'", selectedPath)
+				m.showInput = false
+				m.inputMode = InputModeNone
+				m.inputComponentMode = InputComponentText
+				return m.processUploadWithPath(selectedPath)
+			}
+
+			return m, cmd
 		} else {
 			// Handle text input
 			switch m.inputMode {
@@ -1782,10 +1860,25 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	var cmd tea.Cmd
 	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 		// Update file picker
+		oldDir := m.filePicker.CurrentDirectory
+		oldPath := m.filePicker.Path
 		m.filePicker, cmd = m.filePicker.Update(msg)
+
+		// Log changes for debugging
+		if m.filePicker.CurrentDirectory != oldDir {
+			logrus.Infof("FilePicker directory changed: '%s' -> '%s'", oldDir, m.filePicker.CurrentDirectory)
+		}
+		if m.filePicker.Path != oldPath {
+			logrus.Infof("FilePicker path changed: '%s' -> '%s'", oldPath, m.filePicker.Path)
+		}
 	} else {
 		// Update text input
 		m.textInput, cmd = m.textInput.Update(msg)
+
+		// Smart folder navigation: update file picker directory based on text input
+		if m.inputMode == InputModeUpload {
+			cmd = tea.Batch(cmd, m.updateFilePickerFromTextInput())
+		}
 	}
 
 	return m, cmd
@@ -1834,9 +1927,28 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Check if file exists
+	// Debug: Log the received file path for troubleshooting
+	logrus.Infof("Upload input received file path: '%s' (length: %d)", filePath, len(filePath))
+
+	// Expand tilde to home directory if present
+	if strings.HasPrefix(filePath, "~/") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			originalPath := filePath
+			filePath = filepath.Join(homeDir, filePath[2:])
+			logrus.Infof("Expanded tilde path: '%s' -> '%s'", originalPath, filePath)
+		}
+	}
+
+	// Clean the file path (handles . and .. and extra slashes)
+	originalPath := filePath
+	filePath = filepath.Clean(filePath)
+	if originalPath != filePath {
+		logrus.Infof("Cleaned file path: '%s' -> '%s'", originalPath, filePath)
+	}
+
+	// Check if file exists (filepath.Clean handles spaces correctly)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
+		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), MessageError)
 		return m, nil
 	} else if err != nil {
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
@@ -1859,9 +1971,18 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 		return m, nil
 	}
 
+	logrus.Infof("File picker selected path: '%s' (length: %d)", filePath, len(filePath))
+
+	// Clean the file path (handles . and .. and extra slashes, and spaces)
+	originalPath := filePath
+	filePath = filepath.Clean(filePath)
+	if originalPath != filePath {
+		logrus.Infof("Cleaned picker path: '%s' -> '%s'", originalPath, filePath)
+	}
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
+		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), MessageError)
 		return m, nil
 	} else if err != nil {
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
@@ -1904,23 +2025,164 @@ func (m *FileBrowserModel) clearMessage() {
 	m.statusMessage = ""
 }
 
-// uploadFile uploads a file (placeholder for now)
+// uploadFile uploads a file using the FileUploader
 func (m *FileBrowserModel) uploadFile(filePath string) tea.Cmd {
 	return func() tea.Msg {
-		// TODO: Implement actual upload logic
-		// For now, just simulate success
-		time.Sleep(1 * time.Second)
-		return uploadCompletedMsg{file: filepath.Base(filePath), err: nil}
+		if m.fileUploader == nil {
+			return uploadCompletedMsg{
+				file: filepath.Base(filePath),
+				err:  errors.New("file uploader not initialized"),
+			}
+		}
+
+		// Determine remote path (use filename)
+		remotePath := filepath.Base(filePath)
+		if m.prefix != "" {
+			remotePath = m.prefix + "/" + remotePath
+		}
+
+		// Create upload options from config
+		options := &utils.UploadOptions{
+			Overwrite:    m.config.Upload.DefaultOverwrite,
+			PublicAccess: m.config.Upload.DefaultPublic,
+			ContentType:  "", // Auto-detect
+		}
+
+		// Create progress callback
+		progressCallback := func(uploaded, total int64, percentage float64) {
+			if m.program != nil {
+				m.program.Send(uploadProgressMsg{
+					uploaded:   uploaded,
+					total:      total,
+					percentage: percentage,
+				})
+			}
+		}
+
+		// Perform upload with progress
+		ctx := context.Background()
+		err := m.fileUploader.UploadFileWithProgress(ctx, filePath, remotePath, options, progressCallback)
+
+		return uploadCompletedMsg{
+			file: filepath.Base(filePath),
+			err:  err,
+		}
 	}
 }
 
-// updateFileTable updates the file table with current files
-func (m *FileBrowserModel) updateFileTable() {
-	m.updateTable()
+// updateFilePickerFromTextInput updates file picker directory based on text input path
+func (m *FileBrowserModel) updateFilePickerFromTextInput() tea.Cmd {
+	m.updateFilePickerFromTextInputSync()
+	return nil
+}
+
+// updateFilePickerFromTextInputSync synchronously updates file picker directory based on text input path
+func (m *FileBrowserModel) updateFilePickerFromTextInputSync() {
+	inputText := strings.TrimSpace(m.textInput.Value())
+	if inputText == "" {
+		logrus.Debug("No text input, skipping file picker directory update")
+		return
+	}
+
+	logrus.Infof("Updating file picker directory from text input: '%s'", inputText)
+	oldDir := m.filePicker.CurrentDirectory
+
+	// Expand tilde to home directory if present
+	dirPath := inputText
+	if strings.HasPrefix(dirPath, "~/") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			dirPath = filepath.Join(homeDir, dirPath[2:])
+			logrus.Infof("Expanded tilde for directory: '%s' -> '%s'", inputText, dirPath)
+		}
+	}
+
+	// If the input contains a filename, get the directory part
+	// Check if it's a directory or extract directory from file path
+	if stat, err := os.Stat(dirPath); err == nil {
+		if stat.IsDir() {
+			// Input is a valid directory, update file picker to this directory
+			cleanDir := filepath.Clean(dirPath)
+			if m.filePicker.CurrentDirectory != cleanDir {
+				logrus.Infof("Setting file picker directory to: '%s'", cleanDir)
+				m.filePicker.CurrentDirectory = cleanDir
+			}
+		} else {
+			// Input is a file, update file picker to the file's directory
+			dir := filepath.Dir(dirPath)
+			if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+				cleanDir := filepath.Clean(dir)
+				if m.filePicker.CurrentDirectory != cleanDir {
+					logrus.Infof("Setting file picker directory to parent: '%s'", cleanDir)
+					m.filePicker.CurrentDirectory = cleanDir
+				}
+			}
+		}
+	} else {
+		// Path doesn't exist yet, try to get the directory part
+		dir := filepath.Dir(dirPath)
+		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+			cleanDir := filepath.Clean(dir)
+			if m.filePicker.CurrentDirectory != cleanDir {
+				logrus.Infof("Setting file picker directory to existing parent: '%s'", cleanDir)
+				m.filePicker.CurrentDirectory = cleanDir
+			}
+		} else {
+			// Directory doesn't exist - provide user feedback
+			logrus.Warnf("Directory does not exist: '%s'", dir)
+			m.setMessage(fmt.Sprintf("Directory does not exist: '%s'", dir), MessageError)
+		}
+	}
+
+	// Log the final result
+	if m.filePicker.CurrentDirectory != oldDir {
+		logrus.Infof("File picker directory updated: '%s' -> '%s'", oldDir, m.filePicker.CurrentDirectory)
+	} else {
+		logrus.Debug("File picker directory unchanged")
+	}
+}
+
+// resetUploadState completely resets all upload-related state
+func (m *FileBrowserModel) resetUploadState() {
+	logrus.Info("Resetting upload state to clean defaults")
+
+	// Clear text input
+	m.textInput.SetValue("")
+	m.textInput.Blur()
+
+	// Reset file picker to default directory (user home)
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		if m.filePicker.CurrentDirectory != homeDir {
+			logrus.Infof("Resetting file picker directory from '%s' to home: '%s'", m.filePicker.CurrentDirectory, homeDir)
+			m.filePicker.CurrentDirectory = homeDir
+		}
+	} else {
+		// Fallback to current working directory
+		if cwd, err := os.Getwd(); err == nil {
+			if m.filePicker.CurrentDirectory != cwd {
+				logrus.Infof("Resetting file picker directory from '%s' to cwd: '%s'", m.filePicker.CurrentDirectory, cwd)
+				m.filePicker.CurrentDirectory = cwd
+			}
+		}
+	}
+
+	// Clear file picker selected path
+	m.filePicker.Path = ""
+
+	// Reset input states
+	m.showInput = false
+	m.inputMode = InputModeNone
+	m.inputComponentMode = InputComponentText
+	m.inputPrompt = ""
 }
 
 // uploadCompletedMsg represents upload completion
 type uploadCompletedMsg struct {
 	file string
 	err  error
+}
+
+type uploadProgressMsg struct {
+	uploaded   int64
+	total      int64
+	percentage float64
 }

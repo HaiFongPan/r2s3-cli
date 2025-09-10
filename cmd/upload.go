@@ -107,7 +107,7 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 }
 
 func checkFileExists(client *r2.Client, bucket, key string) (bool, error) {
-	_, err := client.GetS3Client().HeadObject(context.TODO(), &s3.HeadObjectInput{
+	_, err := client.GetS3Client().(*s3.Client).HeadObject(context.TODO(), &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
@@ -313,7 +313,7 @@ func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string
 	}
 
 	// Upload file
-	_, err = client.GetS3Client().PutObject(context.TODO(), input)
+	_, err = client.GetS3Client().(*s3.Client).PutObject(context.TODO(), input)
 	if err != nil {
 		return fmt.Errorf("failed to upload file: %w", err)
 	}

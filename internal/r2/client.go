@@ -44,7 +44,7 @@ func NewClient(cfg *appconfig.R2Config) (*Client, error) {
 }
 
 // GetS3Client returns the underlying S3 client
-func (c *Client) GetS3Client() *s3.Client {
+func (c *Client) GetS3Client() interface{} {
 	return c.s3Client
 }
 
