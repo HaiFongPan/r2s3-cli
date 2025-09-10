@@ -5,18 +5,18 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
 	"github.com/HaiFongPan/r2s3-cli/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfgFile     string
-	verbose     bool
-	quiet       bool
+	cfgFile      string
+	verbose      bool
+	quiet        bool
 	globalConfig *config.Config
 )
 
@@ -95,7 +95,7 @@ func setupLogging() {
 		// Fallback to stderr if can't create log directory
 		logrus.Warnf("Failed to create log directory %s: %v", logDir, err)
 	} else {
-		logFile := filepath.Join(logDir, "r2s3-cli.log")
+		logFile := filepath.Join(logDir, "app.log")
 		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			logrus.Warnf("Failed to open log file %s: %v", logFile, err)
@@ -123,7 +123,7 @@ func GetConfig() *config.Config {
 // runDefaultInteractiveList runs the interactive file browser with default settings
 func runDefaultInteractiveList() error {
 	cfg := globalConfig
-	
+
 	// Create R2 client
 	client, err := r2.NewClient(&cfg.R2)
 	if err != nil {
@@ -133,7 +133,7 @@ func runDefaultInteractiveList() error {
 	// Get effective bucket and empty prefix for default list
 	effectiveBucket := cfg.GetEffectiveBucket()
 	prefix := ""
-	
+
 	// Create model
 	model := tui.NewFileBrowserModel(client, cfg, effectiveBucket, prefix)
 

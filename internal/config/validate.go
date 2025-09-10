@@ -23,10 +23,6 @@ func Validate(config *Config) error {
 		return fmt.Errorf("upload config validation failed: %w", err)
 	}
 
-	if err := validateUIConfig(&config.UI); err != nil {
-		return fmt.Errorf("UI config validation failed: %w", err)
-	}
-
 	return nil
 }
 
@@ -137,29 +133,6 @@ func validateUploadConfig(config *UploadConfig) error {
 	if config == nil {
 		return fmt.Errorf("upload config cannot be nil")
 	}
-	return nil
-}
-
-// validateUIConfig validates UI configuration
-func validateUIConfig(config *UIConfig) error {
-	if config == nil {
-		return fmt.Errorf("UI config cannot be nil")
-	}
-
-	validPreviewMethods := map[string]bool{
-		"auto":    true,
-		"kitty":   true,
-		"iterm2":  true,
-		"ghostty": true,
-		"ascii":   true,
-		"none":    true,
-	}
-
-	method := strings.ToLower(config.ImagePreviewMethod)
-	if !validPreviewMethods[method] {
-		return fmt.Errorf("invalid image_preview_method: %s (valid: auto, kitty, iterm2, ghostty, ascii, none)", config.ImagePreviewMethod)
-	}
-
 	return nil
 }
 

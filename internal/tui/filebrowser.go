@@ -226,41 +226,41 @@ type FileBrowserModel struct {
 	// Bucket selector overlay
 	showingBucketSelector bool
 	bucketSelector        *BucketSelectorModel
-	
+
 	// Pagination
-	currentPage        int
-	hasNextPage       bool
-	continuationToken string
-	paginationLoading bool // Loading state for pagination (different from initial loading)
-	estimatedTotalPages int // Estimated total pages (updated as we navigate)
-	
+	currentPage         int
+	hasNextPage         bool
+	continuationToken   string
+	paginationLoading   bool // Loading state for pagination (different from initial loading)
+	estimatedTotalPages int  // Estimated total pages (updated as we navigate)
+
 	// Input states
-	showInput        bool
-	inputMode        InputMode
+	showInput          bool
+	inputMode          InputMode
 	inputComponentMode InputComponentMode
-	textInput        textinput.Model
-	filePicker       filepicker.Model
-	inputPrompt      string
-	
+	textInput          textinput.Model
+	filePicker         filepicker.Model
+	inputPrompt        string
+
 	// Message system
-	statusMessage    string
-	messageType      MessageType
-	messageTimer     time.Time
-	
+	statusMessage string
+	messageType   MessageType
+	messageTimer  time.Time
+
 	// Search state
-	searchQuery      string
-	isSearchMode     bool
-	
+	searchQuery  string
+	isSearchMode bool
+
 	// Upload state
-	uploadProgress   progress.Model
-	uploading        bool
-	uploadingFile    string
+	uploadProgress progress.Model
+	uploading      bool
+	uploadingFile  string
 }
 
 // createFilePicker creates a properly configured file picker
 func createFilePicker() filepicker.Model {
 	fp := filepicker.New()
-	
+
 	// Set the current directory to a sensible default
 	if cwd, err := os.Getwd(); err == nil {
 		fp.CurrentDirectory = cwd
@@ -272,11 +272,11 @@ func createFilePicker() filepicker.Model {
 			fp.CurrentDirectory = "/"
 		}
 	}
-	
+
 	// Allow all file types
 	fp.AllowedTypes = []string{}
 	fp.ShowHidden = false
-	
+
 	return fp
 }
 
@@ -331,52 +331,52 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		Padding(1, 2)
 
 	m := &FileBrowserModel{
-		client:         client,
-		config:         cfg,
-		bucketName:     bucketName,
-		prefix:         prefix,
-		viewportHeight: 20,
-		loading:        true,
-		windowWidth:    80,
-		windowHeight:   24,
-		urlGenerator:   urlGenerator,
-		fileDownloader: fileDownloader,
-		fileTable:      t,
-		keyMap:         DefaultKeyMap(),
-		help:           h,
-		spinner:        s,
-		helpViewport:   vp,
-		currentPage:    1,
-		hasNextPage:   false,
+		client:              client,
+		config:              cfg,
+		bucketName:          bucketName,
+		prefix:              prefix,
+		viewportHeight:      20,
+		loading:             true,
+		windowWidth:         80,
+		windowHeight:        24,
+		urlGenerator:        urlGenerator,
+		fileDownloader:      fileDownloader,
+		fileTable:           t,
+		keyMap:              DefaultKeyMap(),
+		help:                h,
+		spinner:             s,
+		helpViewport:        vp,
+		currentPage:         1,
+		hasNextPage:         false,
 		estimatedTotalPages: 1,
-		
+
 		// Input states
 		showInput:          false,
 		inputMode:          InputModeNone,
 		inputComponentMode: InputComponentText,
 		textInput:          textinput.New(),
 		filePicker:         createFilePicker(),
-		
+
 		// Message system
-		statusMessage:  "",
-		messageType:    MessageInfo,
-		
+		statusMessage: "",
+		messageType:   MessageInfo,
+
 		// Search state
-		searchQuery:    "",
-		isSearchMode:   false,
-		
+		searchQuery:  "",
+		isSearchMode: false,
+
 		// Upload state
 		uploadProgress: progress.New(progress.WithDefaultGradient()),
 		uploading:      false,
 		uploadingFile:  "",
 	}
-	
+
 	// Configure text input
 	m.textInput.Placeholder = "Type here..."
 	m.textInput.Focus()
 	m.textInput.CharLimit = 200
 	m.textInput.Width = 40
-	
+
 	// Configure file picker
 	m.filePicker.AllowedTypes = []string{} // Allow all file types
 	m.filePicker.ShowPermissions = false
@@ -391,7 +391,7 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 			m.filePicker.CurrentDirectory = cwd
 		}
 	}
-	
+
 	return m
 }
 
@@ -440,12 +440,12 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirmDelete {
 			return m.handleDeleteConfirmation(msg)
 		}
-		
+
 		// Handle input popup
 		if m.showInput {
 			return m.handleInputPopup(msg)
 		}
-		
+
 		return m.handleNavigation(msg)
 
 	case filesLoadedMsg:
@@ -455,7 +455,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hasNextPage = msg.hasNext
 		m.continuationToken = msg.nextToken
 		m.error = msg.err
-		
+
 		// Update estimated total pages
 		if msg.hasNext {
 			// If there are more pages, estimate at least currentPage + 1
@@ -466,7 +466,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If this is the last page, we know the exact total
 			m.estimatedTotalPages = m.currentPage
 		}
-		
+
 		if m.error == nil {
 			m.updateTable()
 		}
@@ -588,7 +588,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		// Handle component internal messages
 		var cmds []tea.Cmd
-		
+
 		// Handle progress bar internal messages
 		progressModel, progressCmd := m.downloadProgress.Update(msg)
 		if progressModel != nil {
@@ -599,7 +599,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if progressCmd != nil {
 			cmds = append(cmds, progressCmd)
 		}
-		
+
 		// Handle file picker internal messages if showing input with file picker
 		if m.showInput && m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 			filePickerModel, filePickerCmd := m.filePicker.Update(msg)
@@ -608,7 +608,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, filePickerCmd)
 			}
 		}
-		
+
 		return m, tea.Batch(cmds...)
 	}
 }
@@ -897,7 +897,7 @@ func (m *FileBrowserModel) View() string {
 
 	// Use bubbles help component for footer
 	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
-	
+
 	// Add status message if present
 	var footerContent string
 	if m.statusMessage != "" && time.Since(m.messageTimer) < 5*time.Second {
@@ -907,22 +907,22 @@ func (m *FileBrowserModel) View() string {
 		switch m.messageType {
 		case MessageError:
 			messageColor = "#FF0000"
-			messageIcon = "❌"
+			messageIcon = "❌ "
 		case MessageSuccess:
 			messageColor = "#00FF00"
-			messageIcon = "✅"
+			messageIcon = "✅ "
 		case MessageWarning:
 			messageColor = "#FFFF00"
-			messageIcon = "⚠️"
+			messageIcon = "⚠️ "
 		default: // MessageInfo
 			messageColor = "#00FFFF"
-			messageIcon = "ℹ️"
+			messageIcon = "ℹ️ "
 		}
-		
+
 		messageStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(messageColor)).
 			Bold(true)
-		
+
 		messageLine := messageStyle.Render(fmt.Sprintf("%s %s", messageIcon, m.statusMessage))
 		footerContent = lipgloss.JoinVertical(lipgloss.Left, helpLine, messageLine)
 	} else {
@@ -932,7 +932,7 @@ func (m *FileBrowserModel) View() string {
 		}
 		footerContent = helpLine
 	}
-	
+
 	footerLine := footerStyle.Render(footerContent)
 
 	baseView := headerLine + "\n" + content + "\n" + footerLine
@@ -987,7 +987,7 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 			MarginTop(1)
 
 		countInfo := fmt.Sprintf("Total: %d files", len(m.files))
-		
+
 		// Add pagination info
 		var pageInfo string
 		if m.hasNextPage {
@@ -995,19 +995,19 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 		} else {
 			pageInfo = fmt.Sprintf(" | Page %d/%d", m.currentPage, m.estimatedTotalPages)
 		}
-		
+
 		if m.currentPage > 1 {
 			pageInfo += " (p: prev)"
 		}
 		if m.hasNextPage {
 			pageInfo += " (n: next)"
 		}
-		
+
 		// Add loading spinner for pagination
 		if m.paginationLoading {
 			pageInfo += fmt.Sprintf(" %s", m.spinner.View())
 		}
-		
+
 		countInfo += pageInfo
 		tableView += "\n" + countStyle.Render(countInfo)
 	}
@@ -1073,21 +1073,17 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			// Make URL clickable with OSC 8 escape sequence
 			clickableURL := m.makeClickableURL(customURL, customURL)
 
-			// Wrap long URLs
-			if len(customURL) > width-6 {
-				for i := 0; i < len(customURL); i += width - 6 {
-					end := i + width - 6
-					if end > len(customURL) {
-						end = len(customURL)
-					}
-					urlPart := customURL[i:end]
-					b.WriteString(urlBoxStyle.Render(m.makeClickableURL(urlPart, customURL)))
-					b.WriteString("\n")
-				}
-			} else {
-				b.WriteString(urlBoxStyle.Render(clickableURL))
-				b.WriteString("\n")
-			}
+			// Display URL without breaking it (preserve clickability)
+			// Use horizontal scrolling style for very long URLs
+			b.WriteString(urlBoxStyle.Render(clickableURL))
+			b.WriteString("\n")
+
+			// // Add raw URL on separate line for easy copying (without styles that might interfere)
+			// rawUrlStyle := lipgloss.NewStyle().
+			// 	Foreground(lipgloss.Color("#666666")).
+			// 	Italic(true)
+			// b.WriteString(rawUrlStyle.Render(fmt.Sprintf("  %s", customURL)))
+			// b.WriteString("\n")
 
 			hintStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#808080")).
@@ -1114,27 +1110,24 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			// Make URL clickable
 			clickablePreviewURL := m.makeClickableURL(m.previewURL, m.previewURL)
 
-			// Wrap long URLs
-			if len(m.previewURL) > width-6 {
-				for i := 0; i < len(m.previewURL); i += width - 6 {
-					end := i + width - 6
-					if end > len(m.previewURL) {
-						end = len(m.previewURL)
-					}
-					urlPart := m.previewURL[i:end]
-					b.WriteString(urlBoxStyle.Render(m.makeClickableURL(urlPart, m.previewURL)))
-					b.WriteString("\n")
-				}
-			} else {
-				b.WriteString(urlBoxStyle.Render(clickablePreviewURL))
-				b.WriteString("\n")
-			}
+			// Display URL without breaking it (preserve clickability)
+			b.WriteString(urlBoxStyle.Render(clickablePreviewURL))
+			b.WriteString("\n")
 
+			// Add raw URL on separate line for easy copying (without styles that might interfere)
+			// rawUrlStyle := lipgloss.NewStyle().
+			// 	Foreground(lipgloss.Color("#666666")).
+			// 	Italic(true)
+			// b.WriteString(rawUrlStyle.Render(fmt.Sprintf("  %s", m.previewURL)))
+			// b.WriteString("\n")
+
+			utils.CopyToClipboard(m.previewURL)
 			hintStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#808080")).
 				Italic(true)
 			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or copy"))
 			b.WriteString("\n")
+			m.setMessage("Presigned URL has copyed to your clipboard", MessageInfo)
 		}
 
 	} else {
@@ -1408,22 +1401,22 @@ func (m *FileBrowserModel) loadFromPage(targetPage int) tea.Cmd {
 		// and skip to the target page. This is less efficient but simpler to implement
 		var continuationToken string
 		var currentPage int = 1
-		
+
 		for currentPage < targetPage {
 			files, hasNext, nextToken, err := m.fetchFiles(continuationToken)
 			if err != nil {
 				return filesLoadedMsg{files: nil, hasNext: false, nextToken: "", err: err}
 			}
-			
+
 			if !hasNext {
 				// We've reached the end before our target page
 				return filesLoadedMsg{files: files, hasNext: hasNext, nextToken: nextToken, err: nil}
 			}
-			
+
 			continuationToken = nextToken
 			currentPage++
 		}
-		
+
 		// Now load the target page
 		files, hasNext, nextToken, err := m.fetchFiles(continuationToken)
 		return filesLoadedMsg{files: files, hasNext: hasNext, nextToken: nextToken, err: err}
@@ -1457,7 +1450,7 @@ func (m *FileBrowserModel) fetchFilesWithQuery(continuationToken, searchQuery st
 	} else if searchQuery != "" {
 		prefix = searchQuery
 	}
-	
+
 	if prefix != "" {
 		input.Prefix = aws.String(prefix)
 	}
@@ -1554,15 +1547,11 @@ func (m *FileBrowserModel) makeClickableURL(displayText, url string) string {
 		return displayText // Return plain text if OSC 8 is disabled
 	}
 
-	// OSC 8 sequence: \033]8;;URL\033\\DISPLAY_TEXT\033]8;;\033\\
-	// Use \007 (BEL) instead of \033\\ as terminator for better compatibility
-	return fmt.Sprintf("\033]8;;%s\007%s\033]8;;\007", url, displayText)
+	return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, displayText)
 }
 
 // shouldDisableOSC8 checks if OSC 8 support should be disabled
 func (m *FileBrowserModel) shouldDisableOSC8() bool {
-	// For now, disable OSC 8 to avoid display issues
-	// Can be made configurable later or add terminal detection
 	return true
 }
 
@@ -1780,25 +1769,25 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 	m.showInput = false
 	m.inputMode = InputModeNone
-	
+
 	// If input is empty, clear search and restore original files
 	if strings.TrimSpace(m.textInput.Value()) == "" {
 		m.clearSearch()
 		m.setMessage("Search cleared", MessageInfo)
 		return m, m.loadFiles()
 	}
-	
+
 	m.searchQuery = strings.TrimSpace(m.textInput.Value())
 	m.isSearchMode = true
 	m.textInput.SetValue("")
 	m.textInput.Blur()
-	
+
 	// Reset pagination for new search
 	m.currentPage = 1
 	m.continuationToken = ""
 	m.estimatedTotalPages = 1
 	m.cursor = 0
-	
+
 	// Start loading with search query
 	m.loading = true
 	m.setMessage(fmt.Sprintf("Searching for '%s'...", m.searchQuery), MessageInfo)
@@ -1809,16 +1798,16 @@ func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 	m.showInput = false
 	m.inputMode = InputModeNone
-	
+
 	filePath := strings.TrimSpace(m.textInput.Value())
 	m.textInput.SetValue("")
 	m.textInput.Blur()
-	
+
 	if filePath == "" {
 		m.setMessage("No file path provided", MessageError)
 		return m, nil
 	}
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
@@ -1827,12 +1816,12 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
 		return m, nil
 	}
-	
+
 	// Start upload process
 	m.uploading = true
 	m.uploadingFile = filepath.Base(filePath)
 	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
-	
+
 	// Return command to start upload
 	return m, m.uploadFile(filePath)
 }
@@ -1843,7 +1832,7 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 		m.setMessage("No file selected", MessageError)
 		return m, nil
 	}
-	
+
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		m.setMessage(fmt.Sprintf("File not found: %s", filePath), MessageError)
@@ -1852,12 +1841,12 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
 		return m, nil
 	}
-	
+
 	// Start upload process
 	m.uploading = true
 	m.uploadingFile = filepath.Base(filePath)
 	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
-	
+
 	// Return command to start upload
 	return m, m.uploadFile(filePath)
 }

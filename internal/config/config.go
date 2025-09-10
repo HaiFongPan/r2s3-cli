@@ -16,7 +16,7 @@ type Config struct {
 	General GeneralConfig `mapstructure:"general"`
 	Upload  UploadConfig  `mapstructure:"upload"`
 	UI      UIConfig      `mapstructure:"ui"`
-	
+
 	// Runtime state (not persisted in config file)
 	TempBucket string    // Temporary bucket for current session
 	UserData   *UserData // User data loaded from user.data file
@@ -24,13 +24,13 @@ type Config struct {
 
 // R2Config holds R2/S3 specific configuration
 type R2Config struct {
-	AccountID       string                `mapstructure:"account_id"`
-	AccessKeyID     string                `mapstructure:"access_key_id"`
-	AccessKeySecret string                `mapstructure:"access_key_secret"`
-	BucketName      string                `mapstructure:"bucket_name"`
-	Endpoint        string                `mapstructure:"endpoint"`
-	Region          string                `mapstructure:"region"`
-	CustomDomains   map[string]string     `mapstructure:"custom_domains"` // bucket -> domain mapping
+	AccountID       string            `mapstructure:"account_id"`
+	AccessKeyID     string            `mapstructure:"access_key_id"`
+	AccessKeySecret string            `mapstructure:"access_key_secret"`
+	BucketName      string            `mapstructure:"bucket_name"`
+	Endpoint        string            `mapstructure:"endpoint"`
+	Region          string            `mapstructure:"region"`
+	CustomDomains   map[string]string `mapstructure:"custom_domains"` // bucket -> domain mapping
 }
 
 // LogConfig holds logging configuration
@@ -48,16 +48,15 @@ type GeneralConfig struct {
 
 // UploadConfig holds upload-specific configuration
 type UploadConfig struct {
-	DefaultOverwrite       bool   `mapstructure:"default_overwrite"`
-	DefaultPublic          bool   `mapstructure:"default_public"`
-	AutoDetectContentType  bool   `mapstructure:"auto_detect_content_type"`
-	DefaultCompress        string `mapstructure:"default_compress"`
+	DefaultOverwrite      bool   `mapstructure:"default_overwrite"`
+	DefaultPublic         bool   `mapstructure:"default_public"`
+	AutoDetectContentType bool   `mapstructure:"auto_detect_content_type"`
+	DefaultCompress       string `mapstructure:"default_compress"`
 }
 
 // UIConfig holds user interface configuration
 type UIConfig struct {
-	InteractiveMode      bool   `mapstructure:"interactive_mode"`
-	ImagePreviewMethod   string `mapstructure:"image_preview_method"`
+	PageSize int `mapstructure:"page_size"`
 }
 
 // Load loads configuration from multiple sources with priority:
@@ -99,7 +98,7 @@ func Load(configPath string) (*Config, error) {
 		// Look for config in common locations
 		v.SetConfigName("config")
 		v.SetConfigType("toml")
-		
+
 		// Add config search paths
 		v.AddConfigPath(".")
 		v.AddConfigPath("$HOME/.r2s3-cli")
@@ -157,8 +156,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("upload.default_compress", "")
 
 	// UI defaults
-	v.SetDefault("ui.interactive_mode", true)
-	v.SetDefault("ui.image_preview_method", "auto")
+	v.SetDefault("ui.page_size", 100)
 }
 
 // GetDefaultConfigPath returns the default configuration file path
@@ -185,7 +183,7 @@ func EnsureConfigDir() error {
 func (c *Config) GetEffectiveBucket() string {
 	var result string
 	var source string
-	
+
 	if c.TempBucket != "" {
 		result = c.TempBucket
 		source = "TempBucket"
@@ -204,10 +202,10 @@ func (c *Config) GetEffectiveBucket() string {
 		result = c.R2.BucketName
 		source = "config default (UserData nil)"
 	}
-	
+
 	// Log bucket selection (reduced frequency)
 	logrus.Debugf("GetEffectiveBucket: using %s: %s", source, result)
-	
+
 	return result
 }
 
@@ -215,7 +213,7 @@ func (c *Config) GetEffectiveBucket() string {
 // This also saves the bucket as LastUsed to persist across commands
 func (c *Config) SetTempBucket(bucket string) {
 	c.TempBucket = bucket
-	
+
 	// Save as last used so it persists across command invocations
 	if c.UserData != nil {
 		c.UserData.SetLastUsed(bucket)
@@ -227,7 +225,7 @@ func (c *Config) SetMainBucket(bucket string) error {
 	if c.UserData == nil {
 		c.UserData = &UserData{}
 	}
-	
+
 	return c.UserData.SetMainBucket(bucket)
 }
 

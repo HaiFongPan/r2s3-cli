@@ -44,3 +44,7 @@ default_overwrite = false
 
 # Automatically detect content type from file extension
 auto_detect_content_type = true
+
+[ui]
+# Number of files to load per page in the file browser
+page_size = 100
