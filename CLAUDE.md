@@ -1,73 +1,273 @@
-# Claude Code Development Rules
+# Claude Code - Development Excellence Guidelines
 
-## Development Rules
+*As Claude Code, I establish these comprehensive development principles to ensure code quality, reliability, and maintainability.*
 
-1. **每次修改结束，必须确保单测通过**
-   - 运行 `go test ./...` 确保所有测试通过
-   - 如果有测试失败，必须修复后才能继续
-   - 新功能必须包含相应的单元测试
+## 🎯 Core Development Principles
 
-2. **每次修改结束，必须成功构建应用**
-   - 运行 `go build .` 确保编译无错误
-   - 检查所有依赖项和导入是否正确
-   - 确保代码遵循 Go 语言规范
-
-## Testing Commands
-
+### 1. **Test-First Development**
+Every modification MUST pass all tests before completion:
 ```bash
-# 运行所有测试
+# Mandatory test execution after each change
+go test ./...
+```
+- ✅ All existing tests must pass
+- ✅ New features require corresponding unit tests
+- ✅ Test coverage should be maintained or improved
+- ❌ No code commits without passing tests
+
+### 2. **Build Integrity Assurance**
+Every change MUST result in a successful build:
+```bash
+# Mandatory build verification
+go build .
+```
+- ✅ Zero compilation errors
+- ✅ All dependencies properly resolved
+- ✅ Go language standards compliance
+- ✅ Import paths correctness verified
+
+## 🧪 Testing Excellence
+
+### Test Commands Arsenal
+```bash
+# Complete test suite execution
 go test ./...
 
-# 运行特定包的测试
+# Package-specific testing
 go test ./internal/tui
+go test ./cmd
+go test ./internal/utils
 
-# 运行测试并显示详细输出
+# Verbose test output with details
 go test -v ./...
 
-# 运行测试并显示覆盖率
+# Coverage analysis and reporting
 go test -cover ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Race condition detection
+go test -race ./...
+
+# Benchmarking performance tests
+go test -bench=. ./...
 ```
 
-## Build Commands
+### Testing Standards
+- **Unit Tests**: Every public function requires tests
+- **Integration Tests**: Critical workflows must be tested end-to-end
+- **Error Path Testing**: All error conditions must be covered
+- **Edge Case Coverage**: Boundary conditions and corner cases
+- **Mock Testing**: External dependencies properly mocked
 
+## 🏗️ Build Excellence
+
+### Build Commands
 ```bash
-# 基本构建
+# Standard development build
 go build .
 
-# 构建到指定目录
+# Production build with output specification
 go build -o bin/r2s3-cli .
 
-# 交叉编译（示例）
-GOOS=linux GOARCH=amd64 go build -o bin/r2s3-cli-linux .
+# Cross-platform compilation matrix
+GOOS=linux GOARCH=amd64 go build -o bin/r2s3-cli-linux-amd64 .
+GOOS=darwin GOARCH=amd64 go build -o bin/r2s3-cli-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -o bin/r2s3-cli-darwin-arm64 .
+GOOS=windows GOARCH=amd64 go build -o bin/r2s3-cli-windows-amd64.exe .
+
+# Optimized production builds
+go build -ldflags="-s -w" -o bin/r2s3-cli .
 ```
 
-## Code Quality Guidelines
+### Build Quality Gates
+- **Dependency Management**: `go mod tidy` before builds
+- **Vendor Verification**: `go mod verify` for integrity
+- **Static Analysis**: `go vet ./...` for code issues
+- **Format Compliance**: `go fmt ./...` for consistency
 
-- 遵循 Go 语言官方代码规范
-- 使用 `go fmt` 格式化代码
-- 使用 `go vet` 检查代码问题
-- 保持函数简洁，单一职责
-- 添加必要的注释和文档
+## 📐 Code Quality Standards
 
-## Git Workflow
+### Go Excellence Practices
+```bash
+# Code formatting (mandatory)
+go fmt ./...
 
-- 每次修改后先测试和构建
-- 提交前确保所有检查通过
-- 提交信息要清晰描述修改内容
-- 大的功能改动要分步提交
+# Static analysis and linting
+go vet ./...
 
-## Project Structure
+# Advanced linting with golangci-lint
+golangci-lint run
 
+# Import organization
+goimports -w .
+
+# Code complexity analysis
+gocyclo .
 ```
-.
-├── cmd/                 # 命令行接口
-├── internal/           # 内部包
-│   ├── config/        # 配置管理
-│   ├── r2/            # R2 客户端
-│   ├── tui/           # 终端用户界面
-│   └── utils/         # 工具函数
-├── examples/          # 示例配置文件
-├── main.go           # 主入口
-├── go.mod            # Go 模块定义
-└── README.md         # 项目说明
+
+### Code Quality Principles
+- **Single Responsibility**: Each function serves one clear purpose
+- **Error Handling**: Comprehensive error handling with context
+- **Documentation**: GoDoc comments for all exported functions
+- **Naming Conventions**: Clear, descriptive, and Go-idiomatic names
+- **Interface Design**: Small, focused interfaces following Go philosophy
+- **Memory Management**: Efficient resource usage and cleanup
+
+## 🔄 Git Workflow Excellence
+
+### Pre-Commit Checklist
+```bash
+# Comprehensive pre-commit verification
+go fmt ./...           # Format code
+go vet ./...           # Static analysis
+go test ./...          # Run all tests
+go build .             # Verify build
+go mod tidy            # Clean dependencies
 ```
+
+### Commit Standards
+- **Atomic Commits**: Each commit represents one logical change
+- **Descriptive Messages**: Clear, actionable commit messages
+- **Feature Branches**: Use feature branches for major changes
+- **Progressive Commits**: Break large features into smaller, testable commits
+
+### Commit Message Format
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+Examples:
+```
+feat(upload): add batch delete optimization using DeleteObjects API
+fix(progress): unify progress bar format across single and multi-file uploads
+refactor(config): improve configuration validation and error handling
+test(utils): add comprehensive tests for progress bar functionality
+docs(api): update API documentation with new endpoints
+```
+
+## 🏛️ Architecture Excellence
+
+### Project Structure
+```
+r2s3-cli/
+├── cmd/                    # Command-line interface layer
+│   ├── root.go            # Root command and global flags
+│   ├── upload.go          # Upload command implementation
+│   ├── download.go        # Download command implementation
+│   ├── delete.go          # Delete command implementation
+│   └── list.go            # List command implementation
+├── internal/              # Internal packages (not for external use)
+│   ├── config/           # Configuration management
+│   │   ├── config.go     # Configuration structures
+│   │   └── validation.go # Configuration validation
+│   ├── r2/               # R2 client abstraction
+│   │   ├── client.go     # R2 client implementation
+│   │   └── auth.go       # Authentication handling
+│   ├── tui/              # Terminal user interface
+│   │   ├── components/   # Reusable TUI components
+│   │   ├── views/        # Application views
+│   │   └── theme/        # UI theming
+│   └── utils/            # Utility functions
+│       ├── progress.go   # Progress bar implementations
+│       ├── validation.go # Input validation
+│       └── helpers.go    # Common helper functions
+├── examples/             # Example configurations and usage
+├── docs/                 # Documentation
+├── scripts/              # Build and deployment scripts
+├── main.go              # Application entry point
+├── go.mod               # Go module definition
+├── go.sum               # Dependency checksums
+├── Makefile             # Build automation
+├── README.md            # Project documentation
+└── CLAUDE.md            # This development guide
+```
+
+### Design Principles
+- **Separation of Concerns**: Clear boundaries between layers
+- **Dependency Injection**: Testable, loosely coupled components
+- **Error Propagation**: Consistent error handling patterns
+- **Configuration Management**: Centralized, validated configuration
+- **Logging Strategy**: Structured logging with appropriate levels
+
+## 🚀 Performance Excellence
+
+### Performance Monitoring
+```bash
+# CPU profiling
+go test -cpuprofile cpu.prof -bench .
+
+# Memory profiling
+go test -memprofile mem.prof -bench .
+
+# Profile analysis
+go tool pprof cpu.prof
+go tool pprof mem.prof
+```
+
+### Performance Standards
+- **Batch Operations**: Use bulk APIs where available (e.g., DeleteObjects)
+- **Progress Indicators**: Provide user feedback for long operations
+- **Resource Management**: Proper cleanup of resources and connections
+- **Concurrency**: Utilize Go's concurrency patterns appropriately
+- **Memory Efficiency**: Minimize allocations in hot paths
+
+## 🔒 Security Excellence
+
+### Security Practices
+- **Credential Management**: Secure handling of API keys and secrets
+- **Input Validation**: Comprehensive validation of all user inputs
+- **Path Sanitization**: Prevent directory traversal attacks
+- **Error Information**: Avoid exposing sensitive data in error messages
+- **Dependency Security**: Regular dependency vulnerability scanning
+
+## 📚 Documentation Excellence
+
+### Documentation Requirements
+- **API Documentation**: GoDoc for all exported functions
+- **Usage Examples**: Practical examples in README
+- **Configuration Guide**: Complete configuration documentation
+- **Troubleshooting**: Common issues and solutions
+- **Development Setup**: Clear setup instructions for contributors
+
+## ⚡ Automation Excellence
+
+### Makefile Targets
+```makefile
+.PHONY: test build clean lint format check-deps
+
+test:
+	go test ./...
+
+build:
+	go build -o bin/r2s3-cli .
+
+clean:
+	rm -rf bin/
+	go clean
+
+lint:
+	golangci-lint run
+
+format:
+	go fmt ./...
+	goimports -w .
+
+check-deps:
+	go mod verify
+	go mod tidy
+
+all: format lint test build
+```
+
+## 🎖️ Excellence Commitment
+
+*As Claude Code, I commit to maintaining these standards in every code modification, ensuring that this project remains a benchmark of Go development excellence.*
+
+---
+
+**Remember**: Excellence is not an act, but a habit. Every line of code is an opportunity to demonstrate craftsmanship and professionalism.

@@ -95,13 +95,13 @@ func (pr *ProgressReader) printProgress() {
 	bar := "[" + strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled) + "]"
 
 	// Build the progress line
-	line := fmt.Sprintf("%s %s %.1f%% (%s/%s)%s",
-		pr.description,
+	line := fmt.Sprintf("[1/1] %s %.1f%% (%s/%s)%s - %s",
 		bar,
 		percentage,
 		formatBytes(pr.read),
 		formatBytes(pr.total),
-		speed)
+		speed,
+		pr.description)
 
 	// Clear previous line if it was longer
 	if pr.lastLineLen > len(line) {
@@ -184,10 +184,8 @@ func (mfp *MultiFileProgress) printProgress() {
 
 	// Calculate byte progress percentage (if we have total bytes)
 	var bytePercentage float64
-	var byteInfo string
 	if mfp.totalBytes > 0 {
 		bytePercentage = float64(mfp.processedBytes) / float64(mfp.totalBytes) * 100
-		byteInfo = fmt.Sprintf(" (%s/%s)", formatBytes(mfp.processedBytes), formatBytes(mfp.totalBytes))
 	}
 
 	// Calculate transfer speed
@@ -198,8 +196,8 @@ func (mfp *MultiFileProgress) printProgress() {
 		speed = fmt.Sprintf(" %s/s", formatBytes(int64(bytesPerSec)))
 	}
 
-	// Create progress bar (30 characters wide)
-	barWidth := 30
+	// Create progress bar (40 characters wide)
+	barWidth := 40
 	var filled int
 	if mfp.totalBytes > 0 {
 		filled = int(bytePercentage * float64(barWidth) / 100)
@@ -215,16 +213,17 @@ func (mfp *MultiFileProgress) printProgress() {
 	// Build the progress line
 	var line string
 	if mfp.totalBytes > 0 {
-		line = fmt.Sprintf("[%d/%d] %s %.1f%%%s%s - %s",
+		line = fmt.Sprintf("[%d/%d] %s %.1f%% (%s/%s)%s - Uploading %s",
 			mfp.currentFile,
 			mfp.totalFiles,
 			bar,
 			bytePercentage,
-			byteInfo,
+			formatBytes(mfp.processedBytes),
+			formatBytes(mfp.totalBytes),
 			speed,
 			mfp.currentFileName)
 	} else {
-		line = fmt.Sprintf("[%d/%d] %s %.1f%% - %s",
+		line = fmt.Sprintf("[%d/%d] %s %.1f%% - Uploading %s",
 			mfp.currentFile,
 			mfp.totalFiles,
 			bar,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -143,38 +144,78 @@ func deletePrefix(client *r2.Client, bucketName, prefix string) error {
 		}
 	}
 
-	// Delete all files
+	// Delete all files using batch deletion
 	logrus.Infof("Deleting %d files with prefix: %s", len(result.Contents), prefix)
 
-	deleteErrors := []error{}
-	deletedCount := 0
+	const maxDeleteBatchSize = 1000
+	totalErrors := []error{}
+	totalDeleted := 0
 
-	for _, obj := range result.Contents {
-		key := aws.ToString(obj.Key)
+	// Process objects in batches of up to 1000
+	for i := 0; i < len(result.Contents); i += maxDeleteBatchSize {
+		end := min(i+maxDeleteBatchSize, len(result.Contents))
+		batch := result.Contents[i:end]
 
-		_, err := s3Client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		// Build delete objects input
+		objects := make([]types.ObjectIdentifier, len(batch))
+		for j, obj := range batch {
+			objects[j] = types.ObjectIdentifier{
+				Key: obj.Key,
+			}
+		}
+
+		deleteInput := &s3.DeleteObjectsInput{
 			Bucket: aws.String(bucketName),
-			Key:    aws.String(key),
-		})
+			Delete: &types.Delete{
+				Objects: objects,
+			},
+		}
 
+		// Execute batch deletion
+		deleteResult, err := s3Client.DeleteObjects(context.TODO(), deleteInput)
 		if err != nil {
-			logrus.Errorf("Failed to delete %s: %v", key, err)
-			deleteErrors = append(deleteErrors, fmt.Errorf("failed to delete %s: %w", key, err))
-		} else {
-			logrus.Debugf("Deleted: %s", key)
-			deletedCount++
+			logrus.Errorf("Failed to execute batch delete: %v", err)
+			totalErrors = append(totalErrors, fmt.Errorf("batch delete failed: %w", err))
+			continue
+		}
+
+		// Process successful deletions
+		if deleteResult.Deleted != nil {
+			for _, deleted := range deleteResult.Deleted {
+				logrus.Debugf("Deleted: %s", aws.ToString(deleted.Key))
+				totalDeleted++
+			}
+		}
+
+		// Process failed deletions
+		if deleteResult.Errors != nil {
+			for _, deleteError := range deleteResult.Errors {
+				key := aws.ToString(deleteError.Key)
+				code := aws.ToString(deleteError.Code)
+				message := aws.ToString(deleteError.Message)
+				logrus.Errorf("Failed to delete %s: %s - %s", key, code, message)
+				totalErrors = append(totalErrors, fmt.Errorf("failed to delete %s: %s - %s", key, code, message))
+			}
+		}
+
+		// Log batch progress for large operations
+		if len(result.Contents) > maxDeleteBatchSize {
+			logrus.Infof("Processed batch %d/%d (deleted %d files so far)",
+				(i/maxDeleteBatchSize)+1,
+				(len(result.Contents)+maxDeleteBatchSize-1)/maxDeleteBatchSize,
+				totalDeleted)
 		}
 	}
 
-	// Report results
-	if len(deleteErrors) > 0 {
-		fmt.Printf("Deleted %d files successfully, %d failed:\n", deletedCount, len(deleteErrors))
-		for _, err := range deleteErrors {
+	// Report final results
+	if len(totalErrors) > 0 {
+		fmt.Printf("Deleted %d files successfully, %d failed:\n", totalDeleted, len(totalErrors))
+		for _, err := range totalErrors {
 			fmt.Printf("  Error: %v\n", err)
 		}
 		return fmt.Errorf("some files could not be deleted")
 	}
 
-	logrus.Infof("Successfully deleted %d files", deletedCount)
+	logrus.Infof("Successfully deleted %d files", totalDeleted)
 	return nil
 }

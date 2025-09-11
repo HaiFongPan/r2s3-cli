@@ -31,7 +31,6 @@ import (
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
 
-
 // FileItem represents a file in the browser
 type FileItem struct {
 	Key          string
@@ -196,7 +195,6 @@ const (
 	InputComponentText InputComponentMode = iota
 	InputComponentFilePicker
 )
-
 
 // FileBrowserModel represents the file browser TUI model
 type FileBrowserModel struct {
@@ -919,8 +917,8 @@ func (m *FileBrowserModel) setupHelpViewport() {
 // View implements the bubbletea.Model interface
 func (m *FileBrowserModel) View() string {
 	// Calculate panel widths
-	leftPanelWidth := int(float64(m.windowWidth) * tuiconfig.LeftPanelWidthRatio)   // 60% for left panel
-	rightPanelWidth := m.windowWidth - leftPanelWidth - 2 // Remaining width minus separator
+	leftPanelWidth := int(float64(m.windowWidth) * tuiconfig.LeftPanelWidthRatio) // 60% for left panel
+	rightPanelWidth := m.windowWidth - leftPanelWidth - 2                         // Remaining width minus separator
 
 	// Render header with consistent styling and left alignment with panel
 	headerStyle := theme.CreateHeaderStyle()
@@ -1483,7 +1481,6 @@ func (m *FileBrowserModel) deleteFile(key string) tea.Cmd {
 	}
 }
 
-
 // Utility functions
 
 func (m *FileBrowserModel) getCategoryEmoji(category string) string {
@@ -1614,7 +1611,6 @@ func (m *FileBrowserModel) updateTable() {
 	}
 	m.fileTable.SetRows(rows)
 }
-
 
 // updateTableSize updates table dimensions and column widths
 func (m *FileBrowserModel) updateTableSize(width, height int) {

@@ -98,7 +98,7 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 	if fileInfo.IsDir() {
 		return uploadDirectory(client, bucketName, localPath, remotePath, cfg, cmd)
 	} else {
-		return uploadSingleFile(client, bucketName, localPath, remotePath, cfg, cmd)
+		return uploadSingleFile(client, bucketName, localPath, remotePath, cfg, cmd, false)
 	}
 }
 
@@ -191,7 +191,7 @@ func compressImage(file *os.File, quality string) ([]byte, int64, error) {
 }
 
 // uploadSingleFile uploads a single file
-func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string, cfg *config.Config, cmd *cobra.Command) error {
+func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string, cfg *config.Config, cmd *cobra.Command, suppressProgress bool) error {
 	// Determine overwrite behavior (CLI flag > config > default)
 	shouldOverwrite := uploadOverwrite
 	if !cmd.Flags().Changed("overwrite") {
@@ -274,8 +274,8 @@ func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string
 		seeker.Seek(0, io.SeekStart)
 	}
 
-	// Wrap upload body with progress bar (if enabled, not in quiet mode, and file is large enough)
-	if !uploadNoProgress && !quiet && finalSize > 1024*100 { // Show progress bar for files larger than 100KB
+	// Wrap upload body with progress bar (if enabled, not in quiet mode, file is large enough, and not suppressed)
+	if !uploadNoProgress && !quiet && !suppressProgress && finalSize > 1024*10 { // Show progress bar for files larger than 10KB
 		description := fmt.Sprintf("Uploading %s", filepath.Base(filePath))
 		progressReader := utils.NewProgressReader(uploadBody, finalSize, description)
 		uploadBody = progressReader
@@ -393,7 +393,7 @@ func uploadDirectory(client *r2.Client, bucketName, localPath, remotePath string
 			progress.StartFile(filepath.Base(file.localPath), fileSize)
 		}
 
-		err := uploadSingleFile(client, bucketName, file.localPath, file.remotePath, cfg, cmd)
+		err := uploadSingleFile(client, bucketName, file.localPath, file.remotePath, cfg, cmd, true)
 		if err != nil {
 			logrus.Errorf("Failed to upload %s: %v", file.localPath, err)
 			errorCount++

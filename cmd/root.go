@@ -29,11 +29,10 @@ It supports uploading, downloading, deleting, and listing files with flexible
 configuration management using TOML files, environment variables, and CLI flags.
 
 Example usage:
-  r2s3-cli # Interactive file browser 
+  r2s3-cli # Interactive file browser
   r2s3-cli upload image.jpg
   r2s3-cli list photos/
-  r2s3-cli delete old-file.jpg
-  r2s3-cli preview image.jpg --url`,
+  r2s3-cli delete old-file.jpg`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},
