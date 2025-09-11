@@ -115,8 +115,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("u", "upload"),
 		),
 		ClearSearch: key.NewBinding(
-			key.WithKeys("c"),
-			key.WithHelp("c", "clear search"),
+			key.WithKeys("l"),
+			key.WithHelp("l", "clear search"),
 		),
 		ChangeBucket: key.NewBinding(
 			key.WithKeys("c"),
@@ -312,7 +312,7 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 	columns := []table.Column{
 		{Title: "📄 NAME", Width: 45},
 		{Title: "📊 SIZE", Width: 10},
-		{Title: "🏷️ TYPE", Width: 8},
+		{Title: "🏷️ TYPE", Width: 12},
 		{Title: "🕒 MODIFIED", Width: 16},
 	}
 
@@ -323,11 +323,8 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		table.WithStyles(table.Styles{
 			Header: lipgloss.NewStyle().
 				BorderStyle(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("#00FFFF")).
 				BorderBottom(true).
-				Bold(true).
-				Foreground(lipgloss.Color("#00FFFF")).
-				Background(lipgloss.Color("#1a1a1a")),
+				Bold(true),
 			Selected: lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFFFFF")).
 				Background(lipgloss.Color("#4A90E2")).
@@ -942,7 +939,7 @@ func (m *FileBrowserModel) View() string {
 		header += fmt.Sprintf("/%s", m.prefix)
 	}
 	if m.isSearchMode && m.searchQuery != "" {
-		header += fmt.Sprintf(" [Search: '%s'] (c: clear)", m.searchQuery)
+		header += fmt.Sprintf(" [Search: '%s'] (l: clear)", m.searchQuery)
 	}
 	headerLine := headerStyle.Render(header)
 
@@ -1584,6 +1581,10 @@ func (m *FileBrowserModel) getFileColor(category string) string {
 		return "#0080FF" // Blue
 	case "document":
 		return "#00FF00" // Green
+	case "spreadsheet":
+		return "#00AA00" // Dark Green
+	case "presentation":
+		return "#FF8800" // Orange
 	case "archive":
 		return "#FFFF00" // Yellow
 	case "video":
@@ -1592,6 +1593,12 @@ func (m *FileBrowserModel) getFileColor(category string) string {
 		return "#FF00FF" // Magenta
 	case "text":
 		return "#00FFFF" // Cyan
+	case "code":
+		return "#AA00FF" // Purple
+	case "data":
+		return "#88CCFF" // Light Blue
+	case "font":
+		return "#FFAAAA" // Light Red
 	default:
 		return "#FFFFFF" // White
 	}
@@ -1603,6 +1610,10 @@ func (m *FileBrowserModel) getCategoryEmoji(category string) string {
 		return "🖼️"
 	case "document":
 		return "📝"
+	case "spreadsheet":
+		return "📊"
+	case "presentation":
+		return "📽️"
 	case "archive":
 		return "📦"
 	case "video":
@@ -1611,8 +1622,43 @@ func (m *FileBrowserModel) getCategoryEmoji(category string) string {
 		return "🎵"
 	case "text":
 		return "📄"
+	case "code":
+		return "💻"
+	case "data":
+		return "🗂️"
+	case "font":
+		return "🔤"
 	default:
 		return "📁"
+	}
+}
+
+func (m *FileBrowserModel) getFormattedCategory(category string) string {
+	switch category {
+	case "image":
+		return "Image"
+	case "document":
+		return "Document"
+	case "spreadsheet":
+		return "Spreadsheet"
+	case "presentation":
+		return "Slides"
+	case "archive":
+		return "Archive"
+	case "video":
+		return "Video"
+	case "audio":
+		return "Audio"
+	case "text":
+		return "Text"
+	case "code":
+		return "Code"
+	case "data":
+		return "Data"
+	case "font":
+		return "Font"
+	default:
+		return "Other"
 	}
 }
 
@@ -1673,9 +1719,10 @@ func (m *FileBrowserModel) updateTable() {
 		nameWithEmoji := fmt.Sprintf("%s %s", emoji, coloredName)
 
 		size := formatFileSize(file.Size)
-		category := strings.ToUpper(file.Category)
-		if len(category) > 6 {
-			category = category[:6]
+		// Better formatted category names
+		category := m.getFormattedCategory(file.Category)
+		if len(category) > 10 {
+			category = category[:10]
 		}
 
 		modified := file.LastModified.Format("01-02 15:04")
@@ -1699,7 +1746,7 @@ func (m *FileBrowserModel) updateTableSize(width, height int) {
 
 	// Fixed column widths with priority to essential information
 	sizeWidth := 10
-	typeWidth := 8
+	typeWidth := 12 // Increased from 8 to 12 for better type names
 	modifiedWidth := 16
 
 	// NAME column gets remaining width, accounting for emoji (2 chars + space)

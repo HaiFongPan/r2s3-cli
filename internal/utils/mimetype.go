@@ -92,8 +92,20 @@ func GetFileCategory(contentType string) string {
 		return "text"
 	case strings.Contains(contentType, "pdf"):
 		return "document"
-	case strings.Contains(contentType, "zip") || strings.Contains(contentType, "tar") || strings.Contains(contentType, "gzip"):
+	case strings.Contains(contentType, "msword") || strings.Contains(contentType, "wordprocessingml"):
+		return "document"
+	case strings.Contains(contentType, "excel") || strings.Contains(contentType, "spreadsheetml"):
+		return "spreadsheet"
+	case strings.Contains(contentType, "powerpoint") || strings.Contains(contentType, "presentationml"):
+		return "presentation"
+	case strings.Contains(contentType, "zip") || strings.Contains(contentType, "tar") || strings.Contains(contentType, "gzip") || strings.Contains(contentType, "rar") || strings.Contains(contentType, "7z"):
 		return "archive"
+	case strings.Contains(contentType, "javascript"):
+		return "code"
+	case strings.Contains(contentType, "json") || strings.Contains(contentType, "xml"):
+		return "data"
+	case strings.Contains(contentType, "font"):
+		return "font"
 	default:
 		return "other"
 	}

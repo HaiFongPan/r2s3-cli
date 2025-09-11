@@ -102,12 +102,34 @@ r2s3-cli delete photos/ --recursive         # Delete with prefix
 
 ## Interactive Browser Controls
 
-- `↑/↓` or `k/j`: Navigate
-- `Enter`: Download file
-- `d`: Delete file  
-- `p`: Show file info
-- `r`: Refresh
-- `?`: Help
+### Navigation
+- `↑/↓` or `k/j`: Navigate files
+- `PgUp/PgDn`: Page up/down
+- `Home/g`: Go to start
+- `End/G`: Go to end
+
+### File Operations
+- `d`: Download file
+- `v`: Preview/generate URL
+- `x`: Delete file
+- `u`: Upload file
+
+### Search & Navigation
+- `s`: Search files
+- `l`: Clear search
+- `c`: Change bucket
+- `r/F5`: Refresh
+
+### URLs
+- `ctrl+o`: Copy custom URL
+- `ctrl+y`: Copy presigned URL
+
+### Pagination
+- `n`: Next page
+- `p`: Previous page
+
+### Other
+- `?/h`: Help
 - `q/Esc`: Quit
 
 ## Image Compression Levels
