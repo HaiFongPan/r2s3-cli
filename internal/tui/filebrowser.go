@@ -25,50 +25,11 @@ import (
 
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
+	tuiconfig "github.com/HaiFongPan/r2s3-cli/internal/tui/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/theme"
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
 
-// Terminal-compatible color constants using ANSI standard colors
-// These colors work consistently across different terminal themes
-const (
-	// Primary colors (ANSI standard)
-	ColorWhite        = "#FFFFFF" // ANSI 15 - primary text
-	ColorBrightBlack  = "#808080" // ANSI 8 - secondary text
-	ColorBrightBlue   = "#5C7CFA" // ANSI 12 - primary accent
-	ColorBrightCyan   = "#51CF66" // ANSI 14 - secondary accent
-	ColorBrightGreen  = "#51CF66" // ANSI 10 - success/links
-	ColorBrightYellow = "#FFD43B" // ANSI 11 - warning
-	ColorBrightRed    = "#FF6B6B" // ANSI 9 - error
-
-	// File type colors (using ANSI palette)
-	ColorFileImage        = "#74C0FC" // Light blue
-	ColorFileDocument     = "#51CF66" // Green
-	ColorFileSpreadsheet  = "#69DB7C" // Light green
-	ColorFilePresentation = "#FFD43B" // Yellow
-	ColorFileArchive      = "#FCC419" // Amber
-	ColorFileVideo        = "#FF8787" // Light red
-	ColorFileAudio        = "#DA77F2" // Purple
-	ColorFileText         = "#74C0FC" // Cyan
-	ColorFileCode         = "#B197FC" // Light purple
-	ColorFileData         = "#74C0FC" // Light blue
-	ColorFileFont         = "#FFB3BA" // Light pink
-)
-
-// Border styles using Unicode box drawing characters
-var (
-	BorderStyleUnified = lipgloss.Border{
-		Top:         "─",
-		Bottom:      "─",
-		Left:        "│",
-		Right:       "│",
-		TopLeft:     "┌",
-		TopRight:    "┐",
-		BottomLeft:  "└",
-		BottomRight: "┘",
-	}
-
-	BorderStyleSeparator = "│"
-)
 
 // FileItem represents a file in the browser
 type FileItem struct {
@@ -352,36 +313,36 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 
 	// Initialize table with proper column configuration
 	columns := []table.Column{
-		{Title: "NAME", Width: 45},
-		{Title: "SIZE", Width: 10},
-		{Title: "TYPE", Width: 12},
-		{Title: "MODIFIED", Width: 16},
+		{Title: "NAME", Width: tuiconfig.DefaultColumnNameWidth},
+		{Title: "SIZE", Width: tuiconfig.DefaultColumnSizeWidth},
+		{Title: "TYPE", Width: tuiconfig.DefaultColumnTypeWidth},
+		{Title: "MODIFIED", Width: tuiconfig.DefaultColumnModifiedWidth},
 	}
 
 	t := table.New(
 		table.WithColumns(columns),
-		table.WithHeight(20),
+		table.WithHeight(tuiconfig.DefaultTableHeight),
 		table.WithFocused(true),
 		table.WithStyles(table.Styles{
 			Header: lipgloss.NewStyle().
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderBottom(true).
-				BorderForeground(lipgloss.Color(ColorBrightBlue)).
-				Foreground(lipgloss.Color(ColorBrightCyan)).
+				BorderForeground(lipgloss.Color(theme.ColorBrightBlue)).
+				Foreground(lipgloss.Color(theme.ColorBrightCyan)).
 				Bold(true),
 			Selected: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorWhite)).
+				Foreground(lipgloss.Color(theme.ColorWhite)).
 				Reverse(true).
 				Bold(true),
 			Cell: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorWhite)),
+				Foreground(lipgloss.Color(theme.ColorWhite)),
 		}),
 	)
 
 	// Initialize spinner for loading states
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightYellow))
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorBrightYellow))
 
 	// Initialize help
 	h := help.New()
@@ -390,8 +351,8 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 	// Initialize help viewport
 	vp := viewport.New(60, 15)
 	vp.Style = lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightBlue)).
+		Border(theme.BorderStyleUnified).
+		BorderForeground(lipgloss.Color(theme.ColorBrightBlue)).
 		Padding(1, 2)
 
 	m := &FileBrowserModel{
@@ -969,15 +930,11 @@ func (m *FileBrowserModel) setupHelpViewport() {
 // View implements the bubbletea.Model interface
 func (m *FileBrowserModel) View() string {
 	// Calculate panel widths
-	leftPanelWidth := int(float64(m.windowWidth) * 0.6)   // 60% for left panel
+	leftPanelWidth := int(float64(m.windowWidth) * tuiconfig.LeftPanelWidthRatio)   // 60% for left panel
 	rightPanelWidth := m.windowWidth - leftPanelWidth - 2 // Remaining width minus separator
 
 	// Render header with consistent styling and left alignment with panel
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ColorBrightCyan)).
-		MarginBottom(1).
-		MarginLeft(1) // Align with left panel border
+	headerStyle := theme.CreateHeaderStyle()
 
 	header := fmt.Sprintf("R2 File Browser - %s", m.bucketName)
 	if m.prefix != "" {
@@ -990,13 +947,13 @@ func (m *FileBrowserModel) View() string {
 
 	// Show loading state with spinner
 	if m.loading {
-		loadingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightYellow))
+		loadingStyle := theme.CreateLoadingStyle()
 		return headerLine + "\n" + loadingStyle.Render(fmt.Sprintf("%s Loading files...", m.spinner.View()))
 	}
 
 	// Show error if any
 	if m.error != nil {
-		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightRed))
+		errorStyle := theme.CreateErrorStyle()
 		return headerLine + "\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.error))
 	}
 
@@ -1022,10 +979,7 @@ func (m *FileBrowserModel) View() string {
 	)
 
 	// Footer with help and status messages
-	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorBrightBlack)).
-		MarginTop(1).
-		MarginLeft(1) // Align with left panel border
+	footerStyle := theme.CreateFooterStyle()
 
 	// Use bubbles help component for footer (always show short help)
 	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
@@ -1039,22 +993,8 @@ func (m *FileBrowserModel) View() string {
 
 	if hasMessage {
 		// Create status message with appropriate color
-		var messageColor string
-		var messageIcon string
-		switch m.messageType {
-		case MessageError:
-			messageColor = ColorBrightRed
-			messageIcon = "❌ "
-		case MessageSuccess:
-			messageColor = ColorBrightGreen
-			messageIcon = "✅ "
-		case MessageWarning:
-			messageColor = ColorBrightYellow
-			messageIcon = "⚠️ "
-		default: // MessageInfo
-			messageColor = ColorBrightCyan
-			messageIcon = "ℹ️ "
-		}
+		messageColor := theme.GetMessageColor(int(m.messageType))
+		messageIcon := theme.GetMessageIcon(int(m.messageType))
 
 		messageStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(messageColor)).
@@ -1100,30 +1040,30 @@ func (m *FileBrowserModel) View() string {
 // renderLeftPanel renders the left panel with file list using table component
 func (m *FileBrowserModel) renderLeftPanel(width int) string {
 	// Create unified panel style
-	panelWidth := width - 2 // Account for border
+	panelWidth := width - tuiconfig.DefaultViewportPadding // Account for border
 	panelHeight := m.viewportHeight
 
 	// Handle empty file list
 	if len(m.files) == 0 {
-		emptyContent := createInfoTextStyle().
+		emptyContent := theme.CreateInfoTextStyle().
 			Align(lipgloss.Center).
-			Width(panelWidth - 2).
+			Width(panelWidth - tuiconfig.DefaultViewportPadding).
 			Height(panelHeight - 4).
 			AlignVertical(lipgloss.Center).
 			Render("No files found")
 
-		return createUnifiedPanelStyle(panelWidth, panelHeight).Render(emptyContent)
+		return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(emptyContent)
 	}
 
 	// Update table width for content area (minus padding)
-	m.updateTableSize(panelWidth-2, panelHeight-4)
+	m.updateTableSize(panelWidth-tuiconfig.DefaultViewportPadding, panelHeight-4)
 
 	// Render the table
 	tableView := m.fileTable.View()
 
 	// Add file count info at the bottom if needed
 	if len(m.files) > 0 {
-		countStyle := createSecondaryTextStyle().MarginTop(1)
+		countStyle := theme.CreateSecondaryTextStyle().MarginTop(tuiconfig.DefaultMarginSize)
 
 		countInfo := fmt.Sprintf("Total: %d files", len(m.files))
 
@@ -1151,7 +1091,7 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 		tableView += "\n" + countStyle.Render(countInfo)
 	}
 
-	return createUnifiedPanelStyle(panelWidth, panelHeight).Render(tableView)
+	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(tableView)
 }
 
 // renderRightPanel renders the right panel with file info
@@ -1159,11 +1099,11 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 	var b strings.Builder
 
 	// Create unified panel style matching left panel
-	panelWidth := width - 2 // Account for border
+	panelWidth := width - tuiconfig.DefaultViewportPadding // Account for border
 	panelHeight := m.viewportHeight
 
 	// Title with consistent styling
-	titleStyle := createSectionHeaderStyle()
+	titleStyle := theme.CreateSectionHeaderStyle()
 	b.WriteString(titleStyle.Render("📋 File Information"))
 	b.WriteString("\n")
 
@@ -1172,7 +1112,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		file := m.files[m.cursor]
 
 		// Basic file information section
-		infoStyle := createInfoTextStyle()
+		infoStyle := theme.CreateInfoTextStyle()
 
 		// File details with emojis
 		b.WriteString(infoStyle.Render(fmt.Sprintf("📄 Name: %s", file.Key)))
@@ -1190,7 +1130,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
 		if customURL != "" {
 			urlSectionStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorBrightGreen)).
+				Foreground(lipgloss.Color(theme.ColorBrightGreen)).
 				Bold(true)
 
 			b.WriteString(urlSectionStyle.Render("🔗 Custom URL:"))
@@ -1209,7 +1149,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", customURL)))
 			// b.WriteString("\n")
 
-			hintStyle := createSecondaryTextStyle()
+			hintStyle := theme.CreateSecondaryTextStyle()
 			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
 			b.WriteString("\n\n")
 		}
@@ -1217,7 +1157,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		// Preview URL section if generated
 		if m.previewURL != "" {
 			previewSectionStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(ColorBrightYellow)).
+				Foreground(lipgloss.Color(theme.ColorBrightYellow)).
 				Bold(true)
 
 			b.WriteString(previewSectionStyle.Render("⏱️ Presigned URL:"))
@@ -1238,21 +1178,21 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", m.previewURL)))
 			// b.WriteString("\n")
 
-			hintStyle := createSecondaryTextStyle()
+			hintStyle := theme.CreateSecondaryTextStyle()
 			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
 			b.WriteString("\n")
 		}
 
 	} else {
 		// No file selected
-		emptyStyle := createInfoTextStyle().
+		emptyStyle := theme.CreateInfoTextStyle().
 			Align(lipgloss.Center)
 
 		b.WriteString(emptyStyle.Render("Select a file to view details"))
 		b.WriteString("\n")
 	}
 
-	return createUnifiedPanelStyle(panelWidth, panelHeight).Render(b.String())
+	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(b.String())
 }
 
 // renderFloatingDialog renders a dialog floating over the base view while keeping base visible
@@ -1288,15 +1228,9 @@ func (m *FileBrowserModel) renderFloatingDialog(baseView, dialog string) string 
 
 // renderDownloadProgress renders the download progress dialog
 func (m *FileBrowserModel) renderDownloadProgress() string {
-	dialogStyle := lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightCyan)).
-		Padding(2, 3).
-		Width(50).
-		Align(lipgloss.Center).
-		Foreground(lipgloss.Color(ColorWhite))
+	dialogStyle := theme.CreateDialogStyle(tuiconfig.DialogDefaultWidth, theme.ColorBrightCyan)
 
-	titleStyle := createSectionHeaderStyle().
+	titleStyle := theme.CreateSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1305,7 +1239,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 	b.WriteString("\n\n")
 
 	// Show filename
-	filenameStyle := createInfoTextStyle().Align(lipgloss.Center)
+	filenameStyle := theme.CreateInfoTextStyle().Align(lipgloss.Center)
 	b.WriteString(filenameStyle.Render(fmt.Sprintf("File: %s", m.downloadingFile)))
 	b.WriteString("\n\n")
 
@@ -1315,7 +1249,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 	b.WriteString("\n\n")
 
 	// Show instructions
-	instructionStyle := createSecondaryTextStyle().Align(lipgloss.Center)
+	instructionStyle := theme.CreateSecondaryTextStyle().Align(lipgloss.Center)
 	b.WriteString(instructionStyle.Render("Press ESC to cancel download"))
 
 	return dialogStyle.Render(b.String())
@@ -1323,13 +1257,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 
 // renderDeleteConfirmation renders the delete confirmation dialog
 func (m *FileBrowserModel) renderDeleteConfirmation() string {
-	dialogStyle := lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightRed)).
-		Padding(2, 3).
-		Width(50).
-		Align(lipgloss.Center).
-		Foreground(lipgloss.Color(ColorWhite))
+	dialogStyle := theme.CreateDialogStyle(tuiconfig.DialogDefaultWidth, theme.ColorBrightRed)
 
 	content := fmt.Sprintf("Delete file: %s\n\nThis action cannot be undone!\n\nPress 'y' to confirm, 'n' to cancel",
 		m.deleteTarget)
@@ -1340,7 +1268,7 @@ func (m *FileBrowserModel) renderDeleteConfirmation() string {
 // renderHelpDialog renders the help dialog using bubbles components
 func (m *FileBrowserModel) renderHelpDialog() string {
 	// Create title
-	titleStyle := createSectionHeaderStyle().
+	titleStyle := theme.CreateSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1356,15 +1284,12 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 	m.helpViewport.SetContent(content)
 
 	// Style the dialog container
-	dialogStyle := lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightCyan)).
-		Padding(1).
-		Width(min(70, m.windowWidth-10)).
-		Foreground(lipgloss.Color(ColorWhite))
+	dialogWidth := min(tuiconfig.DialogLargeWidth, m.windowWidth-10)
+	dialogStyle := theme.CreateDialogStyle(dialogWidth, theme.ColorBrightCyan).
+		Padding(1)
 
 	// Add instructions at the bottom
-	instructionStyle := createSecondaryTextStyle().
+	instructionStyle := theme.CreateSecondaryTextStyle().
 		Align(lipgloss.Center).
 		MarginTop(1)
 
@@ -1383,7 +1308,7 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 // renderInputPopup renders the input popup dialog
 func (m *FileBrowserModel) renderInputPopup() string {
 	// Create title based on input mode
-	titleStyle := createSectionHeaderStyle().
+	titleStyle := theme.CreateSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1418,7 +1343,7 @@ func (m *FileBrowserModel) renderInputPopup() string {
 	}
 
 	// Create instructions
-	instructionStyle := createSecondaryTextStyle().
+	instructionStyle := theme.CreateSecondaryTextStyle().
 		Align(lipgloss.Center).
 		MarginTop(1)
 
@@ -1448,15 +1373,12 @@ func (m *FileBrowserModel) renderInputPopup() string {
 
 	if m.inputComponentMode == InputComponentFilePicker && m.inputMode == InputModeUpload {
 		// Make dialog larger for file picker
-		dialogWidth = min(80, m.windowWidth-5)
+		dialogWidth = min(tuiconfig.FilePickerDialogWidth, m.windowWidth-5)
 		dialogHeight = min(20, m.windowHeight-10) // Set explicit height for file picker
 	}
 
-	dialogStyle := lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightCyan)).
-		Padding(1).
-		Width(dialogWidth)
+	dialogStyle := theme.CreateDialogStyle(dialogWidth, theme.ColorBrightCyan).
+		Padding(1)
 
 	if dialogHeight > 0 {
 		dialogStyle = dialogStyle.Height(dialogHeight)
@@ -1598,64 +1520,8 @@ func (m *FileBrowserModel) deleteFile(key string) tea.Cmd {
 	}
 }
 
-// Style helper functions for terminal-compatible design
-func createUnifiedPanelStyle(width, height int) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Width(width).
-		Height(height).
-		Border(BorderStyleUnified).
-		BorderForeground(lipgloss.Color(ColorBrightBlue)).
-		Padding(1).
-		Foreground(lipgloss.Color(ColorWhite))
-}
-
-func createSectionHeaderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(ColorBrightCyan)).
-		MarginBottom(1)
-}
-
-func createInfoTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorWhite))
-}
-
-func createSecondaryTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorBrightBlack)).
-		Italic(true)
-}
 
 // Utility functions
-func (m *FileBrowserModel) getFileColor(category string) string {
-	switch category {
-	case "image":
-		return ColorFileImage
-	case "document":
-		return ColorFileDocument
-	case "spreadsheet":
-		return ColorFileSpreadsheet
-	case "presentation":
-		return ColorFilePresentation
-	case "archive":
-		return ColorFileArchive
-	case "video":
-		return ColorFileVideo
-	case "audio":
-		return ColorFileAudio
-	case "text":
-		return ColorFileText
-	case "code":
-		return ColorFileCode
-	case "data":
-		return ColorFileData
-	case "font":
-		return ColorFileFont
-	default:
-		return ColorWhite
-	}
-}
 
 func (m *FileBrowserModel) getCategoryEmoji(category string) string {
 	switch category {
@@ -1762,12 +1628,12 @@ func (m *FileBrowserModel) updateTable() {
 	rows := make([]table.Row, len(m.files))
 	for i, file := range m.files {
 		name := file.Key
-		if len(name) > 37 { // Leave space for "..."
-			name = name[:37] + "..."
+		if len(name) > tuiconfig.FileNameTruncateLength { // Leave space for "..."
+			name = name[:tuiconfig.FileNameTruncateLength] + "..."
 		}
 
 		// Apply color to filename only (remove emoji to fix encoding issues)
-		color := m.getFileColor(file.Category)
+		color := theme.GetFileColor(file.Category)
 		coloredName := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(color)).
 			Render(name)
@@ -1775,8 +1641,8 @@ func (m *FileBrowserModel) updateTable() {
 		size := formatFileSize(file.Size)
 		// Better formatted category names
 		category := m.getFormattedCategory(file.Category)
-		if len(category) > 10 {
-			category = category[:10]
+		if len(category) > tuiconfig.CategoryTruncateLength {
+			category = category[:tuiconfig.CategoryTruncateLength]
 		}
 
 		modified := file.LastModified.Format("01-02 15:04")
@@ -1786,12 +1652,6 @@ func (m *FileBrowserModel) updateTable() {
 	m.fileTable.SetRows(rows)
 }
 
-// colorizeFileName applies color to filename based on file category
-func (m *FileBrowserModel) colorizeFileName(name, category string) string {
-	color := m.getFileColor(category)
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-	return style.Render(name)
-}
 
 // updateTableSize updates table dimensions and column widths
 func (m *FileBrowserModel) updateTableSize(width, height int) {
@@ -1799,16 +1659,18 @@ func (m *FileBrowserModel) updateTableSize(width, height int) {
 	totalWidth := width - 8 // Reserve space for borders and padding
 
 	// Fixed column widths with priority to essential information
-	sizeWidth := 10
-	typeWidth := 12 // Increased from 8 to 12 for better type names
-	modifiedWidth := 16
+	sizeWidth := tuiconfig.DefaultColumnSizeWidth
+	typeWidth := tuiconfig.DefaultColumnTypeWidth
+	modifiedWidth := tuiconfig.DefaultColumnModifiedWidth
 
-	// NAME column gets remaining width, accounting for emoji (2 chars + space)
+	// NAME column gets remaining width
 	nameWidth := totalWidth - sizeWidth - typeWidth - modifiedWidth
-	if nameWidth < 25 { // Minimum for emoji + reasonable filename
-		nameWidth = 25
-	} else if nameWidth > 60 { // Maximum to prevent overly long names
-		nameWidth = 60
+	const minNameWidth = 25 // Minimum for reasonable filename
+	const maxNameWidth = 60 // Maximum to prevent overly long names
+	if nameWidth < minNameWidth {
+		nameWidth = minNameWidth
+	} else if nameWidth > maxNameWidth {
+		nameWidth = maxNameWidth
 	}
 
 	// Update table columns
