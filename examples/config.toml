@@ -31,13 +31,6 @@ level = "info"
 # Log format: text or json
 format = "text"
 
-[ui]
-# Enable interactive TUI mode by default for list command
-interactive_mode = true
-
-# Image preview in terminal: auto, kitty, iterm2, ascii, none
-image_preview_method = "auto"
-
 [upload]
 # Default behavior for file overwrite
 default_overwrite = false
@@ -47,4 +40,4 @@ auto_detect_content_type = true
 
 [ui]
 # Number of files to load per page in the file browser
-page_size = 100
+page_size = 50

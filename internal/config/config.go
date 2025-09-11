@@ -88,8 +88,6 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("upload.default_public", "R2CLI_UPLOAD_DEFAULT_PUBLIC")
 	v.BindEnv("upload.auto_detect_content_type", "R2CLI_UPLOAD_AUTO_DETECT_CONTENT_TYPE")
 	v.BindEnv("upload.default_compress", "R2CLI_UPLOAD_DEFAULT_COMPRESS")
-	v.BindEnv("ui.interactive_mode", "R2CLI_UI_INTERACTIVE_MODE")
-	v.BindEnv("ui.image_preview_method", "R2CLI_UI_IMAGE_PREVIEW_METHOD")
 
 	// Configuration file handling
 	if configPath != "" {
@@ -156,7 +154,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("upload.default_compress", "")
 
 	// UI defaults
-	v.SetDefault("ui.page_size", 100)
+	v.SetDefault("ui.page_size", 50)
 }
 
 // GetDefaultConfigPath returns the default configuration file path

@@ -27,7 +27,6 @@ import (
 
 var (
 	uploadBucket      string
-	uploadPublic      bool
 	uploadContentType string
 	uploadOverwrite   bool
 	uploadCompress    string
@@ -45,10 +44,8 @@ Examples:
   r2s3-cli upload image.jpg photos/image.jpg  # Upload file to specific path
   r2s3-cli upload ./photos                    # Upload entire folder recursively
   r2s3-cli upload ./photos images/            # Upload folder to specific path
-  r2s3-cli upload image.jpg --public          # Upload with public access
   r2s3-cli upload image.jpg --compress high   # Upload with high compression
-  r2s3-cli upload image.jpg --no-progress     # Upload without progress bar
-  r2s3-cli upload *.jpg photos/               # Upload multiple files`,
+  r2s3-cli upload image.jpg --no-progress     # Upload without progress bar`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: uploadFile,
 }
@@ -57,7 +54,6 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	uploadCmd.Flags().StringVarP(&uploadBucket, "bucket", "b", "", "bucket name (overrides config)")
-	uploadCmd.Flags().BoolVar(&uploadPublic, "public", false, "make file publicly accessible")
 	uploadCmd.Flags().StringVarP(&uploadContentType, "content-type", "t", "", "specify content type")
 	uploadCmd.Flags().BoolVar(&uploadOverwrite, "overwrite", false, "overwrite existing files")
 	uploadCmd.Flags().StringVarP(&uploadCompress, "compress", "z", "", "image compression level (high, fine, normal, low)")
@@ -111,7 +107,6 @@ func checkFileExists(client *r2.Client, bucket, key string) (bool, error) {
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
-
 	if err != nil {
 		// Check for various "not found" error types
 		var nsk *types.NoSuchKey
@@ -287,12 +282,6 @@ func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string
 		defer progressReader.Close()
 	}
 
-	// Determine public access (CLI flag > config > default)
-	shouldMakePublic := uploadPublic
-	if !cmd.Flags().Changed("public") {
-		shouldMakePublic = cfg.Upload.DefaultPublic
-	}
-
 	// Prepare upload input
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucketName),
@@ -304,12 +293,6 @@ func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string
 	if contentType != "" {
 		input.ContentType = aws.String(contentType)
 		logrus.Debugf("Setting content type: %s", contentType)
-	}
-
-	// Set ACL if public
-	if shouldMakePublic {
-		input.ACL = "public-read"
-		logrus.Debugf("Setting public access")
 	}
 
 	// Upload file
@@ -369,7 +352,6 @@ func uploadDirectory(client *r2.Client, bucketName, localPath, remotePath string
 
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to walk directory %s: %w", localPath, err)
 	}

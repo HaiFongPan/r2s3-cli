@@ -23,17 +23,17 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "r2s3-cli",
-	Short: "A CLI tool for managing Cloudflare R2 storage",
+	Short: "A simple CLI tool for managing Cloudflare R2 storage",
 	Long: `R2S3-CLI is a command line tool for managing files in Cloudflare R2 storage.
 It supports uploading, downloading, deleting, and listing files with flexible
 configuration management using TOML files, environment variables, and CLI flags.
 
 Example usage:
+  r2s3-cli # Interactive file browser 
   r2s3-cli upload image.jpg
   r2s3-cli list photos/
   r2s3-cli delete old-file.jpg
-  r2s3-cli preview image.jpg --url
-  r2s3-cli                    # Interactive file browser`,
+  r2s3-cli preview image.jpg --url`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},
