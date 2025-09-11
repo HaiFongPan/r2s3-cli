@@ -26,6 +26,7 @@ import (
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
 	tuiconfig "github.com/HaiFongPan/r2s3-cli/internal/tui/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 	"github.com/HaiFongPan/r2s3-cli/internal/tui/theme"
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
@@ -196,15 +197,6 @@ const (
 	InputComponentFilePicker
 )
 
-// MessageType represents different message types for status display
-type MessageType int
-
-const (
-	MessageInfo MessageType = iota
-	MessageSuccess
-	MessageWarning
-	MessageError
-)
 
 // FileBrowserModel represents the file browser TUI model
 type FileBrowserModel struct {
@@ -258,9 +250,7 @@ type FileBrowserModel struct {
 	inputPrompt        string
 
 	// Message system
-	statusMessage string
-	messageType   MessageType
-	messageTimer  time.Time
+	messageManager messaging.StatusManager
 
 	// Search state
 	searchQuery  string
@@ -384,8 +374,7 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		filePicker:         createFilePicker(),
 
 		// Message system
-		statusMessage: "",
-		messageType:   MessageInfo,
+		messageManager: messaging.NewStatusManager(),
 
 		// Search state
 		searchQuery:  "",
@@ -507,9 +496,9 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.deleting = false
 		m.deletingFile = ""
 		if msg.err != nil {
-			m.setMessage(fmt.Sprintf("Delete failed: %v", msg.err), MessageError)
+			m.setMessage(theme.FormatErrorMessage("Delete", msg.err), messaging.MessageError)
 		} else {
-			m.setMessage(fmt.Sprintf("File '%s' deleted successfully", m.deleteTarget), MessageSuccess)
+			m.setMessage(theme.FormatSuccessMessage("deleted", m.deleteTarget), messaging.MessageSuccess)
 			// Reload files after successful deletion
 			m.loading = true
 			return m, m.loadFiles()
@@ -618,9 +607,9 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.uploading = false
 		m.uploadingFile = ""
 		if msg.err != nil {
-			m.setMessage(fmt.Sprintf("Upload failed: %v", msg.err), MessageError)
+			m.setMessage(theme.FormatErrorMessage("Upload", msg.err), messaging.MessageError)
 		} else {
-			m.setMessage(fmt.Sprintf("File '%s' uploaded successfully", msg.file), MessageSuccess)
+			m.setMessage(theme.FormatSuccessMessage("uploaded", msg.file), messaging.MessageSuccess)
 			// Reset upload state to prevent cached paths
 			m.resetUploadState()
 			// Refresh files to show the new upload
@@ -809,7 +798,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case key.Matches(msg, m.keyMap.ClearSearch):
 		if m.isSearchMode {
 			m.clearSearch()
-			m.setMessage("Search cleared", MessageInfo)
+			m.setMessage("Search cleared", messaging.MessageInfo)
 			return m, m.loadFiles()
 		}
 		return m, nil
@@ -872,9 +861,9 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
 			if customURL != "" {
 				utils.CopyToClipboard(customURL)
-				m.setMessage("Custom URL copied to clipboard", MessageInfo)
+				m.setMessage("Custom URL copied to clipboard", messaging.MessageInfo)
 			} else {
-				m.setMessage("No custom domain configured for this bucket", MessageError)
+				m.setMessage("No custom domain configured for this bucket", messaging.MessageError)
 			}
 		}
 
@@ -883,10 +872,10 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			file := m.files[m.fileTable.Cursor()]
 			_, presignedURL, err := m.urlGenerator.GenerateFileURL(file.Key)
 			if err != nil {
-				m.setMessage(fmt.Sprintf("Failed to generate presigned URL: %s", err), MessageError)
+				m.setMessage(fmt.Sprintf("Failed to generate presigned URL: %s", err), messaging.MessageError)
 			} else {
 				utils.CopyToClipboard(presignedURL)
-				m.setMessage("Presigned URL copied to clipboard", MessageInfo)
+				m.setMessage("Presigned URL copied to clipboard", messaging.MessageInfo)
 			}
 		}
 
@@ -910,7 +899,7 @@ func (m *FileBrowserModel) handleDeleteConfirmation(msg tea.KeyMsg) (tea.Model, 
 		m.confirmDelete = false
 		m.deleting = true
 		m.deletingFile = filepath.Base(m.deleteTarget)
-		m.setMessage(fmt.Sprintf("Deleting %s...", m.deletingFile), MessageWarning)
+		m.setMessage(theme.FormatProgressMessage("Deleting", m.deletingFile, -1), messaging.MessageWarning)
 		return m, m.deleteFile(m.deleteTarget)
 
 	case key.Matches(msg, m.keyMap.Cancel) || key.Matches(msg, m.keyMap.Quit):
@@ -988,19 +977,8 @@ func (m *FileBrowserModel) View() string {
 
 	// Add status message if present
 	var footerContent string
-	hasMessage := m.statusMessage != ""
-	logrus.Debugf("Message debug - hasMessage: %v, message: '%s'", hasMessage, m.statusMessage)
-
-	if hasMessage {
-		// Create status message with appropriate color
-		messageColor := theme.GetMessageColor(int(m.messageType))
-		messageIcon := theme.GetMessageIcon(int(m.messageType))
-
-		messageStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(messageColor)).
-			Bold(true)
-
-		messageLine := messageStyle.Render(fmt.Sprintf("%s %s", messageIcon, m.statusMessage))
+	if m.messageManager.HasMessage() {
+		messageLine := m.messageManager.RenderMessage()
 		footerContent = lipgloss.JoinVertical(lipgloss.Left, helpLine, messageLine)
 		logrus.Debugf("Footer content debug - showing help + message, final length: %d", len(footerContent))
 	} else {
@@ -1129,9 +1107,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		// Custom domain URL section if configured
 		customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
 		if customURL != "" {
-			urlSectionStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorBrightGreen)).
-				Bold(true)
+			urlSectionStyle := theme.CreateURLSectionStyle()
 
 			b.WriteString(urlSectionStyle.Render("🔗 Custom URL:"))
 			b.WriteString("\n")
@@ -1140,25 +1116,18 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			clickableURL := m.makeClickableURL(customURL, customURL)
 
 			// Display URL with terminal-compatible colors
-			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickableURL)
+			coloredURL := theme.FormatClickableURL(clickableURL, customURL)
 			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// Add raw URL on separate line for easy copying
-			// rawURLStyle := createSecondaryTextStyle()
-			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", customURL)))
-			// b.WriteString("\n")
-
-			hintStyle := theme.CreateSecondaryTextStyle()
+			hintStyle := theme.CreateHintStyle()
 			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
 			b.WriteString("\n\n")
 		}
 
 		// Preview URL section if generated
 		if m.previewURL != "" {
-			previewSectionStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorBrightYellow)).
-				Bold(true)
+			previewSectionStyle := theme.CreatePreviewURLSectionStyle()
 
 			b.WriteString(previewSectionStyle.Render("⏱️ Presigned URL:"))
 			b.WriteString("\n")
@@ -1169,16 +1138,11 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			clickablePreviewURL := m.makeClickableURL(linkText, m.previewURL)
 
 			// Display hyperlink with terminal-compatible colors
-			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickablePreviewURL)
+			coloredURL := theme.FormatClickableURL(clickablePreviewURL, m.previewURL)
 			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// Add full URL for easy copying
-			// rawURLStyle := createSecondaryTextStyle()
-			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", m.previewURL)))
-			// b.WriteString("\n")
-
-			hintStyle := theme.CreateSecondaryTextStyle()
+			hintStyle := theme.CreateHintStyle()
 			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
 			b.WriteString("\n")
 		}
@@ -1202,8 +1166,7 @@ func (m *FileBrowserModel) renderFloatingDialog(baseView, dialog string) string 
 	dimmedLines := make([]string, len(baseLines))
 
 	// Dim the background slightly by applying a darker style
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#666666")) // Dim the text
+	dimStyle := theme.CreateOverlayStyle()
 
 	for i, line := range baseLines {
 		dimmedLines[i] = dimStyle.Render(line)
@@ -1327,7 +1290,7 @@ func (m *FileBrowserModel) renderInputPopup() string {
 	}
 
 	// Create prompt
-	promptStyle := lipgloss.NewStyle().
+	promptStyle := theme.CreatePromptStyle().
 		MarginBottom(1)
 
 	prompt := promptStyle.Render(m.inputPrompt)
@@ -1855,7 +1818,7 @@ func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 	// If input is empty, clear search and restore original files
 	if strings.TrimSpace(m.textInput.Value()) == "" {
 		m.clearSearch()
-		m.setMessage("Search cleared", MessageInfo)
+		m.setMessage("Search cleared", messaging.MessageInfo)
 		return m, m.loadFiles()
 	}
 
@@ -1872,7 +1835,7 @@ func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 
 	// Start loading with search query
 	m.loading = true
-	m.setMessage(fmt.Sprintf("Searching for '%s'...", m.searchQuery), MessageInfo)
+	m.setMessage(fmt.Sprintf("Searching for '%s'...", m.searchQuery), messaging.MessageInfo)
 	return m, m.loadFiles()
 }
 
@@ -1886,7 +1849,7 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 	m.textInput.Blur()
 
 	if filePath == "" {
-		m.setMessage("No file path provided", MessageError)
+		m.setMessage("No file path provided", messaging.MessageError)
 		return m, nil
 	}
 
@@ -1911,17 +1874,17 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 
 	// Check if file exists (filepath.Clean handles spaces correctly)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), MessageError)
+		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), messaging.MessageError)
 		return m, nil
 	} else if err != nil {
-		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
+		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), messaging.MessageError)
 		return m, nil
 	}
 
 	// Start upload process
 	m.uploading = true
 	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
+	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
 
 	// Return command to start upload
 	return m, m.uploadFile(filePath)
@@ -1930,7 +1893,7 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 // processUploadWithPath processes upload with file picker selected path
 func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, tea.Cmd) {
 	if filePath == "" {
-		m.setMessage("No file selected", MessageError)
+		m.setMessage("No file selected", messaging.MessageError)
 		return m, nil
 	}
 
@@ -1945,17 +1908,17 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), MessageError)
+		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), messaging.MessageError)
 		return m, nil
 	} else if err != nil {
-		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), MessageError)
+		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), messaging.MessageError)
 		return m, nil
 	}
 
 	// Start upload process
 	m.uploading = true
 	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), MessageWarning)
+	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
 
 	// Return command to start upload
 	return m, m.uploadFile(filePath)
@@ -1973,19 +1936,13 @@ func (m *FileBrowserModel) clearSearch() {
 }
 
 // setMessage sets a status message with type
-func (m *FileBrowserModel) setMessage(message string, msgType MessageType) {
-	m.statusMessage = message
-	m.messageType = msgType
-	m.messageTimer = time.Now()
-	// Debug: ensure message is set
-	if message != "" {
-		logrus.Debugf("Setting message: %s (type: %d)", message, msgType)
-	}
+func (m *FileBrowserModel) setMessage(message string, msgType messaging.MessageType) {
+	m.messageManager.SetMessage(message, msgType)
 }
 
 // clearMessage clears the status message
 func (m *FileBrowserModel) clearMessage() {
-	m.statusMessage = ""
+	m.messageManager.ClearMessage()
 }
 
 // uploadFile uploads a file using the FileUploader
@@ -2092,7 +2049,7 @@ func (m *FileBrowserModel) updateFilePickerFromTextInputSync() {
 		} else {
 			// Directory doesn't exist - provide user feedback
 			logrus.Warnf("Directory does not exist: '%s'", dir)
-			m.setMessage(fmt.Sprintf("Directory does not exist: '%s'", dir), MessageError)
+			m.setMessage(fmt.Sprintf("Directory does not exist: '%s'", dir), messaging.MessageError)
 		}
 	}
 

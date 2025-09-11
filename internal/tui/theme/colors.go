@@ -56,15 +56,16 @@ func GetFileColor(category string) string {
 	}
 }
 
+// Message type constants for compatibility
+const (
+	MessageInfo = iota
+	MessageSuccess
+	MessageWarning
+	MessageError
+)
+
 // GetMessageColor returns the color for a given message type
 func GetMessageColor(messageType int) string {
-	const (
-		MessageError = iota
-		MessageSuccess
-		MessageWarning
-		MessageInfo
-	)
-
 	switch messageType {
 	case MessageError:
 		return ColorBrightRed
@@ -79,13 +80,6 @@ func GetMessageColor(messageType int) string {
 
 // GetMessageIcon returns the icon for a given message type
 func GetMessageIcon(messageType int) string {
-	const (
-		MessageError = iota
-		MessageSuccess
-		MessageWarning
-		MessageInfo
-	)
-
 	switch messageType {
 	case MessageError:
 		return "❌ "
