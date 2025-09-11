@@ -27,7 +27,7 @@ func DetectContentType(filePath string, reader io.Reader) (string, error) {
 
 		// Detect content type from the buffer
 		contentType := http.DetectContentType(buffer[:n])
-		
+
 		// If it's not generic, return it
 		if contentType != "application/octet-stream" {
 			return contentType, nil

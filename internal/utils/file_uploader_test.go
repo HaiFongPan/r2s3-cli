@@ -34,7 +34,7 @@ func (m *MockS3Client) PutObject(ctx context.Context, params *s3.PutObjectInput,
 			}
 		}
 	}
-	
+
 	args := m.Called(ctx, params)
 	return args.Get(0).(*s3.PutObjectOutput), args.Error(1)
 }
@@ -61,20 +61,20 @@ func TestFileUploader_UploadFile_Success(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World!"
-	
+
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	require.NoError(t, err)
-	
+
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望
 	// 先检查文件是否存在（返回不存在）
 	mockS3Client.On("HeadObject", mock.Anything, mock.Anything).Return((*s3.HeadObjectOutput)(nil), &MockNotFoundError{})
 	// 然后执行上传
 	mockS3Client.On("PutObject", mock.Anything, mock.Anything).Return(&s3.PutObjectOutput{}, nil)
-	
+
 	// 创建配置
 	cfg := &config.Config{
 		Upload: config.UploadConfig{
@@ -83,19 +83,19 @@ func TestFileUploader_UploadFile_Success(t *testing.T) {
 			DefaultCompress:  "",
 		},
 	}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 执行上传
 	ctx := context.Background()
 	options := &UploadOptions{
 		Overwrite:    false,
 		PublicAccess: false,
 	}
-	
+
 	err = uploader.UploadFile(ctx, testFile, "remote/test.txt", options)
-	
+
 	// 验证结果
 	assert.NoError(t, err)
 	mockS3Client.AssertExpectations(t)
@@ -105,19 +105,19 @@ func TestFileUploader_UploadFile_FileNotExists(t *testing.T) {
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 执行上传（文件不存在）
 	ctx := context.Background()
 	options := &UploadOptions{}
-	
+
 	err := uploader.UploadFile(ctx, "/nonexistent/file.txt", "remote/test.txt", options)
-	
+
 	// 验证结果 - 应该返回错误
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "open file failed")
@@ -127,20 +127,20 @@ func TestFileUploader_CheckFileExists_FileExists(t *testing.T) {
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望 - 文件存在
 	mockS3Client.On("HeadObject", mock.Anything, mock.Anything).Return(&s3.HeadObjectOutput{}, nil)
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 检查文件是否存在
 	ctx := context.Background()
 	exists, err := uploader.CheckFileExists(ctx, "remote/test.txt")
-	
+
 	// 验证结果
 	assert.NoError(t, err)
 	assert.True(t, exists)
@@ -151,20 +151,20 @@ func TestFileUploader_CheckFileExists_FileNotExists(t *testing.T) {
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望 - 文件不存在（404 错误）
 	mockS3Client.On("HeadObject", mock.Anything, mock.Anything).Return((*s3.HeadObjectOutput)(nil), &MockNotFoundError{})
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 检查文件是否存在
 	ctx := context.Background()
 	exists, err := uploader.CheckFileExists(ctx, "remote/test.txt")
-	
+
 	// 验证结果
 	assert.NoError(t, err)
 	assert.False(t, exists)
@@ -176,38 +176,38 @@ func TestFileUploader_UploadFileWithProgress_Success(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World! This is a longer content to test progress callback."
-	
+
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	require.NoError(t, err)
-	
+
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望
 	// 先检查文件是否存在（返回不存在）
 	mockS3Client.On("HeadObject", mock.Anything, mock.Anything).Return((*s3.HeadObjectOutput)(nil), &MockNotFoundError{})
 	// 然后执行上传
 	mockS3Client.On("PutObject", mock.Anything, mock.Anything).Return(&s3.PutObjectOutput{}, nil)
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 进度回调变量
 	var progressCalls []float64
 	progressCallback := func(uploaded, total int64, percentage float64) {
 		progressCalls = append(progressCalls, percentage)
 	}
-	
+
 	// 执行上传
 	ctx := context.Background()
 	options := &UploadOptions{}
-	
+
 	err = uploader.UploadFileWithProgress(ctx, testFile, "remote/test.txt", options, progressCallback)
-	
+
 	// 验证结果
 	assert.NoError(t, err)
 	assert.NotEmpty(t, progressCalls, "Progress callback should have been called")
@@ -220,32 +220,32 @@ func TestFileUploader_UploadFile_WithOverwrite(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World!"
-	
+
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	require.NoError(t, err)
-	
+
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望
 	// 由于设置了 overwrite=true，不会检查文件是否存在，直接执行上传
 	mockS3Client.On("PutObject", mock.Anything, mock.Anything).Return(&s3.PutObjectOutput{}, nil)
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 执行上传（设置覆盖选项）
 	ctx := context.Background()
 	options := &UploadOptions{
 		Overwrite: true,
 	}
-	
+
 	err = uploader.UploadFile(ctx, testFile, "remote/test.txt", options)
-	
+
 	// 验证结果
 	assert.NoError(t, err)
 	mockS3Client.AssertExpectations(t)
@@ -256,32 +256,32 @@ func TestFileUploader_UploadFile_FileExistsNoOverwrite(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World!"
-	
+
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	require.NoError(t, err)
-	
+
 	// 创建 mock 客户端
 	mockS3Client := &MockS3Client{}
 	mockR2Client := &MockR2Client{s3Client: mockS3Client}
-	
+
 	// 设置 mock 期望 - 文件存在
 	mockS3Client.On("HeadObject", mock.Anything, mock.Anything).Return(&s3.HeadObjectOutput{}, nil)
 	// 不应该调用 PutObject，因为文件已存在且未设置覆盖
-	
+
 	// 创建配置
 	cfg := &config.Config{}
-	
+
 	// 创建上传器
 	uploader := NewFileUploader(mockR2Client, cfg, "test-bucket")
-	
+
 	// 执行上传（不设置覆盖选项）
 	ctx := context.Background()
 	options := &UploadOptions{
 		Overwrite: false,
 	}
-	
+
 	err = uploader.UploadFile(ctx, testFile, "remote/test.txt", options)
-	
+
 	// 验证结果 - 应该返回错误
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "file conflict failed")
@@ -294,4 +294,3 @@ type MockNotFoundError struct{}
 func (e *MockNotFoundError) Error() string {
 	return "NotFound: The specified key does not exist."
 }
-

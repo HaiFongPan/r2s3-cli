@@ -66,7 +66,7 @@ func init() {
 
 func uploadFile(cmd *cobra.Command, args []string) error {
 	cfg := GetConfig()
-	
+
 	// Create R2 client
 	client, err := r2.NewClient(&cfg.R2)
 	if err != nil {
@@ -80,13 +80,13 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 	}
 
 	localPath := args[0]
-	
+
 	// Check if it's a directory
 	fileInfo, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to access %s: %w", localPath, err)
 	}
-	
+
 	// Determine remote path
 	var remotePath string
 	if len(args) > 1 {
@@ -98,7 +98,7 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 			remotePath = filepath.Base(localPath)
 		}
 	}
-	
+
 	if fileInfo.IsDir() {
 		return uploadDirectory(client, bucketName, localPath, remotePath, cfg, cmd)
 	} else {
@@ -111,7 +111,7 @@ func checkFileExists(client *r2.Client, bucket, key string) (bool, error) {
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
-	
+
 	if err != nil {
 		// Check for various "not found" error types
 		var nsk *types.NoSuchKey
@@ -119,15 +119,15 @@ func checkFileExists(client *r2.Client, bucket, key string) (bool, error) {
 		if errors.As(err, &nsk) || errors.As(err, &nf) {
 			return false, nil
 		}
-		
+
 		// Also check for HTTP 404 status code in error message
 		if strings.Contains(err.Error(), "StatusCode: 404") || strings.Contains(err.Error(), "NotFound") {
 			return false, nil
 		}
-		
+
 		return false, err
 	}
-	
+
 	return true, nil
 }
 
@@ -141,13 +141,13 @@ func isImageFile(filename string) bool {
 func compressImage(file *os.File, quality string) ([]byte, int64, error) {
 	// Reset file position
 	file.Seek(0, 0)
-	
+
 	// Decode image
 	img, format, err := image.Decode(file)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to decode image: %w", err)
 	}
-	
+
 	// Determine JPEG quality based on compression level
 	var jpegQuality int
 	switch quality {
@@ -162,10 +162,10 @@ func compressImage(file *os.File, quality string) ([]byte, int64, error) {
 	default:
 		return nil, 0, fmt.Errorf("invalid compression level: %s (use: high, fine, normal, low)", quality)
 	}
-	
+
 	// Create buffer for compressed image
 	var buf bytes.Buffer
-	
+
 	// Encode based on original format, but convert to JPEG for compression
 	switch format {
 	case "jpeg":
@@ -186,11 +186,11 @@ func compressImage(file *os.File, quality string) ([]byte, int64, error) {
 		resized := imaging.Fit(img, 1920, 1920, imaging.Lanczos) // Resize to max 1920x1920
 		err = jpeg.Encode(&buf, resized, &jpeg.Options{Quality: jpegQuality})
 	}
-	
+
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to encode compressed image: %w", err)
 	}
-	
+
 	compressedData := buf.Bytes()
 	return compressedData, int64(len(compressedData)), nil
 }
@@ -243,10 +243,10 @@ func uploadSingleFile(client *r2.Client, bucketName, filePath, remotePath string
 		}
 		uploadBody = bytes.NewReader(compressedData)
 		finalSize = compressedSize
-		logrus.Infof("Compressed image from %d bytes to %d bytes (%.1f%% reduction)", 
+		logrus.Infof("Compressed image from %d bytes to %d bytes (%.1f%% reduction)",
 			fileInfo.Size(), compressedSize, float64(fileInfo.Size()-compressedSize)/float64(fileInfo.Size())*100)
 	}
-	
+
 	// If not compressing, reset file position
 	if compressionLevel == "" || !isImageFile(filePath) {
 		file.Seek(0, 0)
@@ -355,7 +355,7 @@ func uploadDirectory(client *r2.Client, bucketName, localPath, remotePath string
 
 		// Convert file separators to forward slashes for S3
 		relPath = filepath.ToSlash(relPath)
-		
+
 		// Build remote path
 		remoteFilePath := remotePath + relPath
 
@@ -398,7 +398,7 @@ func uploadDirectory(client *r2.Client, bucketName, localPath, remotePath string
 	// Upload files with progress tracking
 	uploadedCount := 0
 	errorCount := 0
-	
+
 	for _, file := range filesToUpload {
 		// Get file size for progress tracking
 		var fileSize int64

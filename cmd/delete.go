@@ -44,7 +44,7 @@ func init() {
 
 func deleteFile(cmd *cobra.Command, args []string) error {
 	cfg := GetConfig()
-	
+
 	// Create R2 client
 	client, err := r2.NewClient(&cfg.R2)
 	if err != nil {
@@ -82,7 +82,7 @@ func deleteSingleFile(client *r2.Client, bucketName, key string) error {
 		fmt.Printf("Are you sure you want to delete '%s'? (y/N): ", key)
 		var response string
 		fmt.Scanln(&response)
-		
+
 		response = strings.ToLower(strings.TrimSpace(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Delete cancelled.")
@@ -92,7 +92,7 @@ func deleteSingleFile(client *r2.Client, bucketName, key string) error {
 
 	// Delete the file
 	logrus.Infof("Deleting file: %s", key)
-	
+
 	_, err = client.GetS3Client().(*s3.Client).DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
@@ -109,7 +109,7 @@ func deleteSingleFile(client *r2.Client, bucketName, key string) error {
 func deletePrefix(client *r2.Client, bucketName, prefix string) error {
 	// List all files with the prefix
 	s3Client := client.GetS3Client().(*s3.Client)
-	
+
 	listInput := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 		Prefix: aws.String(prefix),
@@ -135,7 +135,7 @@ func deletePrefix(client *r2.Client, bucketName, prefix string) error {
 		fmt.Printf("\nAre you sure you want to delete all these files? This cannot be undone! (y/N): ")
 		var response string
 		fmt.Scanln(&response)
-		
+
 		response = strings.ToLower(strings.TrimSpace(response))
 		if response != "y" && response != "yes" {
 			fmt.Println("Delete cancelled.")
@@ -145,13 +145,13 @@ func deletePrefix(client *r2.Client, bucketName, prefix string) error {
 
 	// Delete all files
 	logrus.Infof("Deleting %d files with prefix: %s", len(result.Contents), prefix)
-	
+
 	deleteErrors := []error{}
 	deletedCount := 0
 
 	for _, obj := range result.Contents {
 		key := aws.ToString(obj.Key)
-		
+
 		_, err := s3Client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 			Bucket: aws.String(bucketName),
 			Key:    aws.String(key),

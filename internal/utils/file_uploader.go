@@ -23,19 +23,19 @@ type ProgressCallback func(uploaded, total int64, percentage float64)
 type FileUploader interface {
 	// UploadFile 上传单个文件
 	UploadFile(ctx context.Context, localPath, remotePath string, options *UploadOptions) error
-	
+
 	// UploadFileWithProgress 上传文件并提供进度回调
 	UploadFileWithProgress(ctx context.Context, localPath, remotePath string, options *UploadOptions, callback ProgressCallback) error
-	
+
 	// CheckFileExists 检查远程文件是否存在
 	CheckFileExists(ctx context.Context, remotePath string) (bool, error)
 }
 
 // UploadOptions 上传选项
 type UploadOptions struct {
-	Overwrite       bool
-	PublicAccess    bool
-	ContentType     string
+	Overwrite        bool
+	PublicAccess     bool
+	ContentType      string
 	CompressionLevel string
 }
 
@@ -76,7 +76,7 @@ type fileUploader struct {
 // NewFileUploader 创建新的文件上传器
 func NewFileUploader(client R2ClientInterface, cfg *config.Config, bucketName string) FileUploader {
 	s3Client := extractS3Client(client)
-	
+
 	return &fileUploader{
 		r2Client:   client,
 		s3Client:   s3Client,
@@ -90,21 +90,21 @@ func extractS3Client(client R2ClientInterface) S3ClientInterface {
 	if client == nil {
 		return nil
 	}
-	
+
 	s3ClientRaw := client.GetS3Client()
 	if s3ClientRaw == nil {
 		return nil
 	}
-	
+
 	// 尝试类型断言
 	if s3c, ok := s3ClientRaw.(S3ClientInterface); ok {
 		return s3c
 	}
-	
+
 	if s3c, ok := s3ClientRaw.(*s3.Client); ok {
 		return s3c
 	}
-	
+
 	return nil
 }
 
@@ -132,7 +132,7 @@ func (fu *fileUploader) UploadFileWithProgress(ctx context.Context, localPath, r
 	}
 
 	fileSize := fileInfo.Size()
-	
+
 	// 确定内容类型
 	contentType := fu.determineContentType(localPath, file, options.ContentType)
 
@@ -160,10 +160,10 @@ func (fu *fileUploader) CheckFileExists(ctx context.Context, remotePath string) 
 		if errors.As(err, &nsk) || errors.As(err, &nf) {
 			return false, nil
 		}
-		
+
 		// 也检查错误消息中是否包含 404 或 NotFound
-		if strings.Contains(err.Error(), "StatusCode: 404") || 
-		   strings.Contains(err.Error(), "NotFound") {
+		if strings.Contains(err.Error(), "StatusCode: 404") ||
+			strings.Contains(err.Error(), "NotFound") {
 			return false, nil
 		}
 
@@ -254,12 +254,12 @@ func (fu *fileUploader) determineContentType(localPath string, file *os.File, ex
 
 	// 保存当前文件位置
 	currentPos, _ := file.Seek(0, 1)
-	
+
 	contentType, _ := DetectContentType(localPath, file)
-	
+
 	// 恢复文件位置
 	file.Seek(currentPos, 0)
-	
+
 	return contentType
 }
 
@@ -309,7 +309,7 @@ type progressReader struct {
 // Read 实现 io.Reader 接口并触发进度回调
 func (pr *progressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
-	
+
 	if n > 0 {
 		pr.read += int64(n)
 		if pr.callback != nil {

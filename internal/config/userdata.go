@@ -102,7 +102,7 @@ func getUserDataPath() (string, error) {
 
 	// Use the same directory as config file
 	configDir := filepath.Join(homeDir, ".r2s3-cli")
-	
+
 	// Create directory if it doesn't exist
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return "", err

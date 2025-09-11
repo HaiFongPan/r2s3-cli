@@ -140,14 +140,14 @@ func formatBytes(bytes int64) string {
 
 // MultiFileProgress tracks progress for multiple file uploads
 type MultiFileProgress struct {
-	totalFiles     int
-	currentFile    int
-	totalBytes     int64
-	processedBytes int64
+	totalFiles      int
+	currentFile     int
+	totalBytes      int64
+	processedBytes  int64
 	currentFileName string
-	startTime      time.Time
-	lastPrint      time.Time
-	lastLineLen    int
+	startTime       time.Time
+	lastPrint       time.Time
+	lastLineLen     int
 }
 
 // NewMultiFileProgress creates a new multi-file progress tracker
@@ -181,7 +181,7 @@ func (mfp *MultiFileProgress) printProgress() {
 
 	// Calculate file progress percentage
 	filePercentage := float64(mfp.currentFile) / float64(mfp.totalFiles) * 100
-	
+
 	// Calculate byte progress percentage (if we have total bytes)
 	var bytePercentage float64
 	var byteInfo string

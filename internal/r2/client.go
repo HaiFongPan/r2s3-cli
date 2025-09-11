@@ -56,12 +56,12 @@ func (c *Client) GetBucketName() string {
 // ListBuckets lists all buckets in the R2 account
 func (c *Client) ListBuckets(ctx context.Context) ([]types.Bucket, error) {
 	input := &s3.ListBucketsInput{}
-	
+
 	result, err := c.s3Client.ListBuckets(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list buckets: %w", err)
 	}
-	
+
 	return result.Buckets, nil
 }
 
@@ -70,17 +70,17 @@ func (c *Client) GetBucketLocation(ctx context.Context, bucketName string) (stri
 	input := &s3.GetBucketLocationInput{
 		Bucket: aws.String(bucketName),
 	}
-	
+
 	result, err := c.s3Client.GetBucketLocation(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("failed to get bucket location for %s: %w", bucketName, err)
 	}
-	
+
 	// Handle empty location constraint (default region)
 	if result.LocationConstraint == "" {
 		return "us-east-1", nil
 	}
-	
+
 	return string(result.LocationConstraint), nil
 }
 
@@ -89,12 +89,12 @@ func (c *Client) HeadBucket(ctx context.Context, bucketName string) error {
 	input := &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
 	}
-	
+
 	_, err := c.s3Client.HeadBucket(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to head bucket %s: %w", bucketName, err)
 	}
-	
+
 	return nil
 }
 
@@ -103,12 +103,12 @@ func (c *Client) GetBucketPolicy(ctx context.Context, bucketName string) (*s3.Ge
 	input := &s3.GetBucketPolicyInput{
 		Bucket: aws.String(bucketName),
 	}
-	
+
 	result, err := c.s3Client.GetBucketPolicy(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bucket policy for %s: %w", bucketName, err)
 	}
-	
+
 	return result, nil
 }
 
@@ -117,11 +117,11 @@ func (c *Client) GetBucketWebsite(ctx context.Context, bucketName string) (*s3.G
 	input := &s3.GetBucketWebsiteInput{
 		Bucket: aws.String(bucketName),
 	}
-	
+
 	result, err := c.s3Client.GetBucketWebsite(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bucket website configuration for %s: %w", bucketName, err)
 	}
-	
+
 	return result, nil
 }

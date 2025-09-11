@@ -80,7 +80,7 @@ func TestFileBrowser_DeleteStatusBlocking(t *testing.T) {
 	cfg := &config.Config{
 		R2: config.R2Config{
 			AccountID:       "test-account",
-			AccessKeyID:     "test-key", 
+			AccessKeyID:     "test-key",
 			AccessKeySecret: "test-secret",
 		},
 	}
@@ -91,7 +91,7 @@ func TestFileBrowser_DeleteStatusBlocking(t *testing.T) {
 
 	// 创建 FileBrowser 模型
 	model := NewFileBrowserModel(client, cfg, "test-bucket", "")
-	
+
 	// 设置删除状态
 	model.deleting = true
 	model.deletingFile = "test.txt"
@@ -114,7 +114,7 @@ func TestFileBrowser_DeleteStatusBlocking(t *testing.T) {
 			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}}
 			updatedModel, cmd := model.Update(keyMsg)
 			fbModel := updatedModel.(*FileBrowserModel)
-			
+
 			// 验证操作被阻塞
 			assert.True(t, fbModel.deleting, "Delete state should remain true")
 			assert.Equal(t, "test.txt", fbModel.deletingFile, "Deleting file should remain unchanged")

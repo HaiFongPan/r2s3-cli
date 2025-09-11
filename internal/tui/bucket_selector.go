@@ -26,29 +26,29 @@ type BucketItem struct {
 
 // BucketSelectorModel represents the bucket selector TUI model
 type BucketSelectorModel struct {
-	buckets        []BucketItem
-	selectedIndex  int
-	loading        bool
-	showHelp       bool
-	message        string
-	messageTimer   time.Time
-	client         *r2.Client
-	config         *config.Config
-	keyMap         BucketSelectorKeyMap
-	help           help.Model
-	windowWidth    int
-	windowHeight   int
+	buckets       []BucketItem
+	selectedIndex int
+	loading       bool
+	showHelp      bool
+	message       string
+	messageTimer  time.Time
+	client        *r2.Client
+	config        *config.Config
+	keyMap        BucketSelectorKeyMap
+	help          help.Model
+	windowWidth   int
+	windowHeight  int
 }
 
 // BucketSelectorKeyMap defines keybindings for bucket selector
 type BucketSelectorKeyMap struct {
-	Up         key.Binding
-	Down       key.Binding
-	Select     key.Binding
-	SetMain    key.Binding
-	Help       key.Binding
-	Quit       key.Binding
-	Refresh    key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Select  key.Binding
+	SetMain key.Binding
+	Help    key.Binding
+	Quit    key.Binding
+	Refresh key.Binding
 }
 
 // DefaultBucketSelectorKeyMap returns default keybindings
@@ -101,13 +101,13 @@ func (k BucketSelectorKeyMap) FullHelp() [][]key.Binding {
 // NewBucketSelectorModel creates a new bucket selector model
 func NewBucketSelectorModel(client *r2.Client, cfg *config.Config) *BucketSelectorModel {
 	return &BucketSelectorModel{
-		client:         client,
-		config:         cfg,
-		keyMap:         DefaultBucketSelectorKeyMap(),
-		help:           help.New(),
-		loading:        true,
-		windowWidth:    80,
-		windowHeight:   24,
+		client:       client,
+		config:       cfg,
+		keyMap:       DefaultBucketSelectorKeyMap(),
+		help:         help.New(),
+		loading:      true,
+		windowWidth:  80,
+		windowHeight: 24,
 	}
 }
 
@@ -243,7 +243,7 @@ func (m *BucketSelectorModel) renderLoading() string {
 		Render("Loading buckets...")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", loading)
-	
+
 	return lipgloss.Place(
 		m.windowWidth, m.windowHeight,
 		lipgloss.Center, lipgloss.Center,
@@ -271,7 +271,7 @@ func (m *BucketSelectorModel) renderEmpty() string {
 		Render("Press 'r' to refresh or 'q' to quit")
 
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", empty, "", help)
-	
+
 	return lipgloss.Place(
 		m.windowWidth, m.windowHeight,
 		lipgloss.Center, lipgloss.Center,
@@ -441,7 +441,7 @@ func (m *BucketSelectorModel) loadBuckets() tea.Cmd {
 			if bucket.Name != nil {
 				bucketName = *bucket.Name
 			}
-			
+
 			item := BucketItem{
 				Name:      bucketName,
 				IsMain:    bucketName == mainBucket,
@@ -452,7 +452,7 @@ func (m *BucketSelectorModel) loadBuckets() tea.Cmd {
 		}
 
 		logrus.Infof("BucketSelector: loaded %d buckets", len(bucketItems))
-		
+
 		// Log each loaded bucket for debugging
 		for i, item := range bucketItems {
 			status := ""
@@ -464,7 +464,7 @@ func (m *BucketSelectorModel) loadBuckets() tea.Cmd {
 			}
 			logrus.Infof("BucketSelector: bucket[%d]: %s%s", i, item.Name, status)
 		}
-		
+
 		return bucketsLoadedMsg{buckets: bucketItems}
 	}
 }
