@@ -9,6 +9,7 @@ import (
 
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 )
 
 // TestFileBrowser_DeleteStatusIndication 测试删除状态指示
@@ -57,8 +58,10 @@ func TestFileBrowser_DeleteStatusIndication(t *testing.T) {
 	assert.False(t, fbModel2.confirmDelete)
 	assert.True(t, fbModel2.deleting)
 	assert.Equal(t, "test-file.txt", fbModel2.deletingFile)
-	assert.Contains(t, fbModel2.statusMessage, "Deleting test-file.txt...")
-	assert.Equal(t, MessageWarning, fbModel2.messageType)
+	message2, msgType2, hasMessage2 := fbModel2.messageManager.GetMessage()
+	assert.True(t, hasMessage2)
+	assert.Contains(t, message2, "Deleting test-file.txt...")
+	assert.Equal(t, messaging.MessageWarning, msgType2)
 	assert.NotNil(t, cmd2)
 
 	// 模拟删除完成（成功）
@@ -69,8 +72,10 @@ func TestFileBrowser_DeleteStatusIndication(t *testing.T) {
 	// 验证删除完成后的状态
 	assert.False(t, fbModel3.deleting)
 	assert.Equal(t, "", fbModel3.deletingFile)
-	assert.Contains(t, fbModel3.statusMessage, "deleted successfully")
-	assert.Equal(t, MessageSuccess, fbModel3.messageType)
+	message3, msgType3, hasMessage3 := fbModel3.messageManager.GetMessage()
+	assert.True(t, hasMessage3)
+	assert.Contains(t, message3, "deleted successfully")
+	assert.Equal(t, messaging.MessageSuccess, msgType3)
 	assert.NotNil(t, cmd3) // 应该有重新加载文件的命令
 }
 

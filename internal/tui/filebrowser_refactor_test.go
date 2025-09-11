@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 )
 
 // TestFileBrowser_UploadFileWithSpaces 测试文件名包含空格的上传
@@ -79,8 +81,10 @@ func TestFileBrowser_TextInputWithNonExistentDirectory(t *testing.T) {
 	model.updateFilePickerFromTextInputSync()
 
 	// 应该显示目录不存在的错误消息
-	assert.Contains(t, model.statusMessage, "Directory does not exist")
-	assert.Equal(t, MessageError, model.messageType)
+	message, msgType, hasMessage := model.messageManager.GetMessage()
+	assert.True(t, hasMessage)
+	assert.Contains(t, message, "Directory does not exist")
+	assert.Equal(t, messaging.MessageError, msgType)
 }
 
 // TestFileBrowser_HandleInvalidPathError 测试处理无效路径的错误消息
@@ -108,8 +112,10 @@ func TestFileBrowser_HandleInvalidPathError(t *testing.T) {
 	assert.False(t, fbModel.showInput)
 
 	// 应该显示错误消息
-	assert.Contains(t, fbModel.statusMessage, "File not found")
-	assert.Equal(t, MessageError, fbModel.messageType)
+	message, msgType, hasMessage := fbModel.messageManager.GetMessage()
+	assert.True(t, hasMessage)
+	assert.Contains(t, message, "File not found")
+	assert.Equal(t, messaging.MessageError, msgType)
 
 	// 不应该有上传命令（因为文件不存在）
 	assert.Nil(t, cmd)

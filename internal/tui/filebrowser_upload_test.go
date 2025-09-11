@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
 
@@ -171,7 +172,9 @@ func TestFileBrowser_HandleUploadMessages(t *testing.T) {
 		assert.Empty(t, fbModel.uploadingFile)
 
 		// 验证状态消息
-		assert.Contains(t, fbModel.statusMessage, "uploaded successfully")
+		message, _, hasMessage := fbModel.messageManager.GetMessage()
+		assert.True(t, hasMessage)
+		assert.Contains(t, message, "uploaded successfully")
 
 		// 应该有刷新文件列表的命令
 		assert.NotNil(t, cmd)
@@ -189,7 +192,9 @@ func TestFileBrowser_HandleUploadMessages(t *testing.T) {
 		assert.Empty(t, fbModel.uploadingFile)
 
 		// 验证错误消息
-		assert.Contains(t, fbModel.statusMessage, "Upload failed")
+		message, _, hasMessage := fbModel.messageManager.GetMessage()
+		assert.True(t, hasMessage)
+		assert.Contains(t, message, "Upload failed")
 
 		// 不应该刷新文件列表
 		assert.Nil(t, cmd)
@@ -250,6 +255,9 @@ func createTestFileBrowser() *FileBrowserModel {
 		showInput:          false,
 		inputMode:          InputModeNone,
 		inputComponentMode: InputComponentText,
+
+		// 消息管理器
+		messageManager: messaging.NewStatusManager(),
 
 		// 键映射
 		keyMap: DefaultKeyMap(),
