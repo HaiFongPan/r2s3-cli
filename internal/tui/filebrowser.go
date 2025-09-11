@@ -28,6 +28,48 @@ import (
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
 
+// Terminal-compatible color constants using ANSI standard colors
+// These colors work consistently across different terminal themes
+const (
+	// Primary colors (ANSI standard)
+	ColorWhite        = "#FFFFFF" // ANSI 15 - primary text
+	ColorBrightBlack  = "#808080" // ANSI 8 - secondary text
+	ColorBrightBlue   = "#5C7CFA" // ANSI 12 - primary accent
+	ColorBrightCyan   = "#51CF66" // ANSI 14 - secondary accent
+	ColorBrightGreen  = "#51CF66" // ANSI 10 - success/links
+	ColorBrightYellow = "#FFD43B" // ANSI 11 - warning
+	ColorBrightRed    = "#FF6B6B" // ANSI 9 - error
+
+	// File type colors (using ANSI palette)
+	ColorFileImage        = "#74C0FC" // Light blue
+	ColorFileDocument     = "#51CF66" // Green
+	ColorFileSpreadsheet  = "#69DB7C" // Light green
+	ColorFilePresentation = "#FFD43B" // Yellow
+	ColorFileArchive      = "#FCC419" // Amber
+	ColorFileVideo        = "#FF8787" // Light red
+	ColorFileAudio        = "#DA77F2" // Purple
+	ColorFileText         = "#74C0FC" // Cyan
+	ColorFileCode         = "#B197FC" // Light purple
+	ColorFileData         = "#74C0FC" // Light blue
+	ColorFileFont         = "#FFB3BA" // Light pink
+)
+
+// Border styles using Unicode box drawing characters
+var (
+	BorderStyleUnified = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "┌",
+		TopRight:    "┐",
+		BottomLeft:  "└",
+		BottomRight: "┘",
+	}
+
+	BorderStyleSeparator = "│"
+)
+
 // FileItem represents a file in the browser
 type FileItem struct {
 	Key          string
@@ -310,10 +352,10 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 
 	// Initialize table with proper column configuration
 	columns := []table.Column{
-		{Title: "📄 NAME", Width: 45},
-		{Title: "📊 SIZE", Width: 10},
-		{Title: "🏷️ TYPE", Width: 12},
-		{Title: "🕒 MODIFIED", Width: 16},
+		{Title: "NAME", Width: 45},
+		{Title: "SIZE", Width: 10},
+		{Title: "TYPE", Width: 12},
+		{Title: "MODIFIED", Width: 16},
 	}
 
 	t := table.New(
@@ -324,20 +366,22 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 			Header: lipgloss.NewStyle().
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderBottom(true).
+				BorderForeground(lipgloss.Color(ColorBrightBlue)).
+				Foreground(lipgloss.Color(ColorBrightCyan)).
 				Bold(true),
 			Selected: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(lipgloss.Color("#4A90E2")).
+				Foreground(lipgloss.Color(ColorWhite)).
+				Reverse(true).
 				Bold(true),
 			Cell: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")),
+				Foreground(lipgloss.Color(ColorWhite)),
 		}),
 	)
 
 	// Initialize spinner for loading states
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightYellow))
 
 	// Initialize help
 	h := help.New()
@@ -346,8 +390,8 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 	// Initialize help viewport
 	vp := viewport.New(60, 15)
 	vp.Style = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFEB3B")).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightBlue)).
 		Padding(1, 2)
 
 	m := &FileBrowserModel{
@@ -928,11 +972,12 @@ func (m *FileBrowserModel) View() string {
 	leftPanelWidth := int(float64(m.windowWidth) * 0.6)   // 60% for left panel
 	rightPanelWidth := m.windowWidth - leftPanelWidth - 2 // Remaining width minus separator
 
-	// Render header
+	// Render header with consistent styling and left alignment with panel
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#00FF80")).
-		MarginBottom(1)
+		Foreground(lipgloss.Color(ColorBrightCyan)).
+		MarginBottom(1).
+		MarginLeft(1) // Align with left panel border
 
 	header := fmt.Sprintf("R2 File Browser - %s", m.bucketName)
 	if m.prefix != "" {
@@ -945,13 +990,13 @@ func (m *FileBrowserModel) View() string {
 
 	// Show loading state with spinner
 	if m.loading {
-		loadingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
+		loadingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightYellow))
 		return headerLine + "\n" + loadingStyle.Render(fmt.Sprintf("%s Loading files...", m.spinner.View()))
 	}
 
 	// Show error if any
 	if m.error != nil {
-		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightRed))
 		return headerLine + "\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.error))
 	}
 
@@ -961,18 +1006,26 @@ func (m *FileBrowserModel) View() string {
 	// Render right panel (file info)
 	rightPanel := m.renderRightPanel(rightPanelWidth)
 
-	// Combine panels side by side
+	// Create elegant separator between panels - let lipgloss handle alignment automatically
+	// separator := lipgloss.NewStyle().
+	// 	Width(3).
+	// 	Foreground(lipgloss.Color(ColorBrightBlue)).
+	// 	Align(lipgloss.Center).
+	// 	Render("│")
+
+	// Combine panels side by side with improved separator
 	content := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		leftPanel,
-		lipgloss.NewStyle().Width(2).Render("  "), // Separator
+		// separator,
 		rightPanel,
 	)
 
 	// Footer with help and status messages
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		MarginTop(1)
+		Foreground(lipgloss.Color(ColorBrightBlack)).
+		MarginTop(1).
+		MarginLeft(1) // Align with left panel border
 
 	// Use bubbles help component for footer (always show short help)
 	helpLine := m.help.ShortHelpView(m.keyMap.ShortHelp())
@@ -990,16 +1043,16 @@ func (m *FileBrowserModel) View() string {
 		var messageIcon string
 		switch m.messageType {
 		case MessageError:
-			messageColor = "#FF0000"
+			messageColor = ColorBrightRed
 			messageIcon = "❌ "
 		case MessageSuccess:
-			messageColor = "#00FF00"
+			messageColor = ColorBrightGreen
 			messageIcon = "✅ "
 		case MessageWarning:
-			messageColor = "#FFFF00"
+			messageColor = ColorBrightYellow
 			messageIcon = "⚠️ "
 		default: // MessageInfo
-			messageColor = "#00FFFF"
+			messageColor = ColorBrightCyan
 			messageIcon = "ℹ️ "
 		}
 
@@ -1046,28 +1099,31 @@ func (m *FileBrowserModel) View() string {
 
 // renderLeftPanel renders the left panel with file list using table component
 func (m *FileBrowserModel) renderLeftPanel(width int) string {
+	// Create unified panel style
+	panelWidth := width - 2 // Account for border
+	panelHeight := m.viewportHeight
+
 	// Handle empty file list
 	if len(m.files) == 0 {
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")).
-			Width(width).
-			Height(m.viewportHeight).
+		emptyContent := createInfoTextStyle().
 			Align(lipgloss.Center).
-			AlignVertical(lipgloss.Center)
-		return emptyStyle.Render("No files found")
+			Width(panelWidth - 2).
+			Height(panelHeight - 4).
+			AlignVertical(lipgloss.Center).
+			Render("No files found")
+
+		return createUnifiedPanelStyle(panelWidth, panelHeight).Render(emptyContent)
 	}
 
-	// Update table width if needed
-	m.updateTableSize(width, m.viewportHeight)
+	// Update table width for content area (minus padding)
+	m.updateTableSize(panelWidth-2, panelHeight-4)
 
 	// Render the table
 	tableView := m.fileTable.View()
 
 	// Add file count info at the bottom if needed
 	if len(m.files) > 0 {
-		countStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")).
-			MarginTop(1)
+		countStyle := createSecondaryTextStyle().MarginTop(1)
 
 		countInfo := fmt.Sprintf("Total: %d files", len(m.files))
 
@@ -1095,35 +1151,28 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 		tableView += "\n" + countStyle.Render(countInfo)
 	}
 
-	return tableView
+	return createUnifiedPanelStyle(panelWidth, panelHeight).Render(tableView)
 }
 
 // renderRightPanel renders the right panel with file info
 func (m *FileBrowserModel) renderRightPanel(width int) string {
 	var b strings.Builder
 
-	// Panel container style
-	panelStyle := lipgloss.NewStyle().
-		Width(width).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder(), false, false, false, true)
+	// Create unified panel style matching left panel
+	panelWidth := width - 2 // Account for border
+	panelHeight := m.viewportHeight
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#00FFFF")).
-		MarginBottom(1)
-
-	b.WriteString(titleStyle.Render("File Information"))
+	// Title with consistent styling
+	titleStyle := createSectionHeaderStyle()
+	b.WriteString(titleStyle.Render("📋 File Information"))
 	b.WriteString("\n")
 
 	// Show file info if a file is selected
 	if len(m.files) > 0 && m.cursor < len(m.files) {
 		file := m.files[m.cursor]
 
-		// Basic file information
-		infoStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF"))
+		// Basic file information section
+		infoStyle := createInfoTextStyle()
 
 		// File details with emojis
 		b.WriteString(infoStyle.Render(fmt.Sprintf("📄 Name: %s", file.Key)))
@@ -1137,80 +1186,73 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		b.WriteString(infoStyle.Render(fmt.Sprintf("🕒 Modified: %s", file.LastModified.Format("2006-01-02 15:04:05"))))
 		b.WriteString("\n\n")
 
-		// Custom domain URL if configured
+		// Custom domain URL section if configured
 		customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
 		if customURL != "" {
-			urlStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00FF00"))
+			urlSectionStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorBrightGreen)).
+				Bold(true)
 
-			b.WriteString(urlStyle.Render("🔗 Custom URL:"))
+			b.WriteString(urlSectionStyle.Render("🔗 Custom URL:"))
 			b.WriteString("\n")
 
 			// Make URL clickable with OSC 8 escape sequence
 			clickableURL := m.makeClickableURL(customURL, customURL)
 
-			// Display URL with direct ANSI codes (avoid lipgloss rendering which breaks OSC 8)
-			// Use ANSI color 51 (bright cyan) and underline, then reset
+			// Display URL with terminal-compatible colors
 			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickableURL)
 			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// Add raw URL on separate line for easy mouse selection and copying
-			// Use direct ANSI codes to avoid lipgloss interference
-			rawURL := fmt.Sprintf("\033[38;5;242m\033[3m  %s\033[0m", customURL)
-			b.WriteString(rawURL)
-			b.WriteString("\n")
+			// Add raw URL on separate line for easy copying
+			// rawURLStyle := createSecondaryTextStyle()
+			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", customURL)))
+			// b.WriteString("\n")
 
-			hintStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#CCCCCC")).
-				Italic(true)
+			hintStyle := createSecondaryTextStyle()
 			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
 			b.WriteString("\n\n")
 		}
 
-		// Preview URL if generated
+		// Preview URL section if generated
 		if m.previewURL != "" {
-			previewStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFF00"))
+			previewSectionStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ColorBrightYellow)).
+				Bold(true)
 
-			b.WriteString(previewStyle.Render("⏱️ Presigned URL:"))
+			b.WriteString(previewSectionStyle.Render("⏱️ Presigned URL:"))
 			b.WriteString("\n")
 
 			// Use hyperlink format for long URLs - display filename as clickable link
 			filename := filepath.Base(file.Key)
-			linkText := fmt.Sprintf("📥 [点击下载 %s]", filename)
+			linkText := fmt.Sprintf("📥 [Click to download %s]", filename)
 			clickablePreviewURL := m.makeClickableURL(linkText, m.previewURL)
 
-			// Display hyperlink with direct ANSI codes (avoid lipgloss rendering which breaks OSC 8)
-			// Use ANSI color 51 (bright cyan) and underline, then reset
+			// Display hyperlink with terminal-compatible colors
 			coloredURL := fmt.Sprintf("\033[38;5;51m\033[4m%s\033[0m", clickablePreviewURL)
 			b.WriteString(coloredURL)
 			b.WriteString("\n")
 
-			// Add full URL for easy mouse selection and copying
-			// Use direct ANSI codes to avoid lipgloss interference
-			rawURL := fmt.Sprintf("\033[38;5;242m\033[3m  %s\033[0m", m.previewURL)
-			b.WriteString(rawURL)
-			b.WriteString("\n")
+			// Add full URL for easy copying
+			// rawURLStyle := createSecondaryTextStyle()
+			// b.WriteString(rawURLStyle.Render(fmt.Sprintf("  %s", m.previewURL)))
+			// b.WriteString("\n")
 
-			hintStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#CCCCCC")).
-				Italic(true)
+			hintStyle := createSecondaryTextStyle()
 			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
 			b.WriteString("\n")
 		}
 
 	} else {
 		// No file selected
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC")).
+		emptyStyle := createInfoTextStyle().
 			Align(lipgloss.Center)
 
 		b.WriteString(emptyStyle.Render("Select a file to view details"))
 		b.WriteString("\n")
 	}
 
-	return panelStyle.Render(b.String())
+	return createUnifiedPanelStyle(panelWidth, panelHeight).Render(b.String())
 }
 
 // renderFloatingDialog renders a dialog floating over the base view while keeping base visible
@@ -1247,17 +1289,14 @@ func (m *FileBrowserModel) renderFloatingDialog(baseView, dialog string) string 
 // renderDownloadProgress renders the download progress dialog
 func (m *FileBrowserModel) renderDownloadProgress() string {
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#00FFFF")).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightCyan)).
 		Padding(2, 3).
 		Width(50).
 		Align(lipgloss.Center).
-		Background(lipgloss.Color("#1a1a1a")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Foreground(lipgloss.Color(ColorWhite))
 
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#00FFFF")).
+	titleStyle := createSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1266,9 +1305,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 	b.WriteString("\n\n")
 
 	// Show filename
-	filenameStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Align(lipgloss.Center)
+	filenameStyle := createInfoTextStyle().Align(lipgloss.Center)
 	b.WriteString(filenameStyle.Render(fmt.Sprintf("File: %s", m.downloadingFile)))
 	b.WriteString("\n\n")
 
@@ -1278,10 +1315,7 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 	b.WriteString("\n\n")
 
 	// Show instructions
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Italic(true).
-		Align(lipgloss.Center)
+	instructionStyle := createSecondaryTextStyle().Align(lipgloss.Center)
 	b.WriteString(instructionStyle.Render("Press ESC to cancel download"))
 
 	return dialogStyle.Render(b.String())
@@ -1290,13 +1324,12 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 // renderDeleteConfirmation renders the delete confirmation dialog
 func (m *FileBrowserModel) renderDeleteConfirmation() string {
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FF6B6B")).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightRed)).
 		Padding(2, 3).
 		Width(50).
 		Align(lipgloss.Center).
-		Background(lipgloss.Color("#1a1a1a")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Foreground(lipgloss.Color(ColorWhite))
 
 	content := fmt.Sprintf("Delete file: %s\n\nThis action cannot be undone!\n\nPress 'y' to confirm, 'n' to cancel",
 		m.deleteTarget)
@@ -1307,9 +1340,7 @@ func (m *FileBrowserModel) renderDeleteConfirmation() string {
 // renderHelpDialog renders the help dialog using bubbles components
 func (m *FileBrowserModel) renderHelpDialog() string {
 	// Create title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFEB3B")).
+	titleStyle := createSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1326,17 +1357,14 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 
 	// Style the dialog container
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFEB3B")).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightCyan)).
 		Padding(1).
 		Width(min(70, m.windowWidth-10)).
-		Background(lipgloss.Color("#1a1a1a")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Foreground(lipgloss.Color(ColorWhite))
 
 	// Add instructions at the bottom
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Italic(true).
+	instructionStyle := createSecondaryTextStyle().
 		Align(lipgloss.Center).
 		MarginTop(1)
 
@@ -1355,9 +1383,7 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 // renderInputPopup renders the input popup dialog
 func (m *FileBrowserModel) renderInputPopup() string {
 	// Create title based on input mode
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFEB3B")).
+	titleStyle := createSectionHeaderStyle().
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1392,9 +1418,7 @@ func (m *FileBrowserModel) renderInputPopup() string {
 	}
 
 	// Create instructions
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Italic(true).
+	instructionStyle := createSecondaryTextStyle().
 		Align(lipgloss.Center).
 		MarginTop(1)
 
@@ -1429,8 +1453,8 @@ func (m *FileBrowserModel) renderInputPopup() string {
 	}
 
 	dialogStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FFEB3B")).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightCyan)).
 		Padding(1).
 		Width(dialogWidth)
 
@@ -1574,33 +1598,62 @@ func (m *FileBrowserModel) deleteFile(key string) tea.Cmd {
 	}
 }
 
+// Style helper functions for terminal-compatible design
+func createUnifiedPanelStyle(width, height int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Border(BorderStyleUnified).
+		BorderForeground(lipgloss.Color(ColorBrightBlue)).
+		Padding(1).
+		Foreground(lipgloss.Color(ColorWhite))
+}
+
+func createSectionHeaderStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(ColorBrightCyan)).
+		MarginBottom(1)
+}
+
+func createInfoTextStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorWhite))
+}
+
+func createSecondaryTextStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorBrightBlack)).
+		Italic(true)
+}
+
 // Utility functions
 func (m *FileBrowserModel) getFileColor(category string) string {
 	switch category {
 	case "image":
-		return "#0080FF" // Blue
+		return ColorFileImage
 	case "document":
-		return "#00FF00" // Green
+		return ColorFileDocument
 	case "spreadsheet":
-		return "#00AA00" // Dark Green
+		return ColorFileSpreadsheet
 	case "presentation":
-		return "#FF8800" // Orange
+		return ColorFilePresentation
 	case "archive":
-		return "#FFFF00" // Yellow
+		return ColorFileArchive
 	case "video":
-		return "#FF0000" // Red
+		return ColorFileVideo
 	case "audio":
-		return "#FF00FF" // Magenta
+		return ColorFileAudio
 	case "text":
-		return "#00FFFF" // Cyan
+		return ColorFileText
 	case "code":
-		return "#AA00FF" // Purple
+		return ColorFileCode
 	case "data":
-		return "#88CCFF" // Light Blue
+		return ColorFileData
 	case "font":
-		return "#FFAAAA" // Light Red
+		return ColorFileFont
 	default:
-		return "#FFFFFF" // White
+		return ColorWhite
 	}
 }
 
@@ -1713,10 +1766,11 @@ func (m *FileBrowserModel) updateTable() {
 			name = name[:37] + "..."
 		}
 
-		// Add emoji and color coding based on file type
-		emoji := m.getCategoryEmoji(file.Category)
-		coloredName := m.colorizeFileName(name, file.Category)
-		nameWithEmoji := fmt.Sprintf("%s %s", emoji, coloredName)
+		// Apply color to filename only (remove emoji to fix encoding issues)
+		color := m.getFileColor(file.Category)
+		coloredName := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(color)).
+			Render(name)
 
 		size := formatFileSize(file.Size)
 		// Better formatted category names
@@ -1727,7 +1781,7 @@ func (m *FileBrowserModel) updateTable() {
 
 		modified := file.LastModified.Format("01-02 15:04")
 
-		rows[i] = table.Row{nameWithEmoji, size, category, modified}
+		rows[i] = table.Row{coloredName, size, category, modified}
 	}
 	m.fileTable.SetRows(rows)
 }
@@ -1759,10 +1813,10 @@ func (m *FileBrowserModel) updateTableSize(width, height int) {
 
 	// Update table columns
 	columns := []table.Column{
-		{Title: "📄 NAME", Width: nameWidth},
-		{Title: "📊 SIZE", Width: sizeWidth},
-		{Title: "🏷️ TYPE", Width: typeWidth},
-		{Title: "🕒 MODIFIED", Width: modifiedWidth},
+		{Title: "NAME", Width: nameWidth},
+		{Title: "SIZE", Width: sizeWidth},
+		{Title: "TYPE", Width: typeWidth},
+		{Title: "MODIFIED", Width: modifiedWidth},
 	}
 
 	m.fileTable.SetColumns(columns)
