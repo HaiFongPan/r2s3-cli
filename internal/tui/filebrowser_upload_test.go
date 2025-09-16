@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/image"
 	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
 )
@@ -262,6 +263,11 @@ func createTestFileBrowser() *FileBrowserModel {
 		// 键映射
 		keyMap: DefaultKeyMap(),
 	}
+
+	// 初始化 imageManager（在测试中使用文本模式，避免终端控制序列）
+	model.imageManager = image.NewImageManager("/tmp/r2s3-cli-cache-test", 10*1024*1024)
+	model.imageManager.SetUseTextRender(true)
+	model.imageManager.SetCellSize(30, 8)
 
 	// 初始化输入组件
 	model.textInput = textinput.New()

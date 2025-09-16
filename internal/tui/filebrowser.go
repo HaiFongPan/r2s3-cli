@@ -26,6 +26,7 @@ import (
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
 	tuiconfig "github.com/HaiFongPan/r2s3-cli/internal/tui/config"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/image"
 	"github.com/HaiFongPan/r2s3-cli/internal/tui/messaging"
 	"github.com/HaiFongPan/r2s3-cli/internal/tui/theme"
 	"github.com/HaiFongPan/r2s3-cli/internal/utils"
@@ -58,6 +59,8 @@ type KeyMap struct {
 	ChangeBucket key.Binding
 	NextPage     key.Binding
 	PrevPage     key.Binding
+	ToggleImage  key.Binding
+	ForcePreview key.Binding
 	Help         key.Binding
 	Quit         key.Binding
 	Confirm      key.Binding
@@ -130,8 +133,16 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("n", "next page"),
 		),
 		PrevPage: key.NewBinding(
+			key.WithKeys("b"),
+			key.WithHelp("b", "prev page"),
+		),
+		ToggleImage: key.NewBinding(
 			key.WithKeys("p"),
-			key.WithHelp("p", "prev page"),
+			key.WithHelp("p", "preview image"),
+		),
+		ForcePreview: key.NewBinding(
+			key.WithKeys("P"),
+			key.WithHelp("P", "force preview"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?", "h"),
@@ -174,7 +185,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Search, k.Upload, k.ClearSearch},
 		{k.CopyCustom, k.CopyPresign},
 		{k.ChangeBucket},
-		{k.NextPage, k.PrevPage},
+		{k.NextPage, k.PrevPage, k.ToggleImage, k.ForcePreview},
 		{k.Help, k.Quit},
 	}
 }
@@ -263,6 +274,22 @@ type FileBrowserModel struct {
 	// Delete state
 	deleting     bool
 	deletingFile string
+
+	// Image preview state
+	imageManager        *image.ImageManager
+	imagePreview        *image.ImagePreview
+	isImagePreviewing   bool
+	imageSpinner        spinner.Model
+	imageLoadingFile    string
+	currentPreviewForce bool
+	imageAreaCols       int
+	imageAreaRows       int
+
+	// Preview modal state
+	showingPreview   bool
+	previewModal     *ImagePreviewModel
+	lastPreviewFile  *FileItem
+	lastPreviewForce bool
 }
 
 // createFilePicker creates a properly configured file picker
@@ -386,6 +413,16 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		// Delete state
 		deleting:     false,
 		deletingFile: "",
+
+		// Image preview state
+		imageManager:        image.NewImageManager("/tmp/r2s3-cli-cache", 100*1024*1024), // 100MB cache
+		imagePreview:        nil,
+		isImagePreviewing:   false,
+		imageSpinner:        spinner.New(),
+		imageLoadingFile:    "",
+		currentPreviewForce: false,
+		lastPreviewFile:     nil,
+		lastPreviewForce:    false,
 	}
 
 	// Configure text input
@@ -399,6 +436,18 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 	m.filePicker.ShowPermissions = false
 	m.filePicker.ShowSize = true
 	m.filePicker.ShowHidden = false
+
+	// Configure image spinner
+	m.imageSpinner.Spinner = spinner.Dot
+	m.imageSpinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorBrightYellow))
+
+	// Configure image manager with S3 client
+	if s3Client, ok := client.GetS3Client().(*s3.Client); ok {
+		m.imageManager.SetDownloaderClient(s3Client)
+		m.imageManager.SetBucketName(bucketName)
+	}
+	// 在 TUI 中启用安全的文本模式渲染，避免控制序列破坏 UI
+	m.imageManager.SetUseTextRender(true)
 	// Set current directory to user's home directory
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		m.filePicker.CurrentDirectory = homeDir
@@ -419,7 +468,7 @@ func (m *FileBrowserModel) SetProgram(p *tea.Program) {
 
 // Init implements the bubbletea.Model interface
 func (m *FileBrowserModel) Init() tea.Cmd {
-	return tea.Batch(m.loadFiles(), m.spinner.Tick)
+	return tea.Batch(m.loadFiles(), m.spinner.Tick, m.imageSpinner.Tick)
 }
 
 // Update implements the bubbletea.Model interface
@@ -440,6 +489,15 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// If preview modal is showing, route keys to it first
+		if m.showingPreview && m.previewModal != nil {
+			// Let modal handle closure keys
+			newModal, cmd := m.previewModal.Update(msg)
+			if im, ok := newModal.(*ImagePreviewModel); ok {
+				m.previewModal = im
+			}
+			return m, cmd
+		}
 		// If bucket selector is showing, handle its keys
 		if m.showingBucketSelector && m.bucketSelector != nil {
 			// Check for ESC key to close bucket selector
@@ -472,6 +530,7 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hasNextPage = msg.hasNext
 		m.continuationToken = msg.nextToken
 		m.error = msg.err
+		m.clearInlinePreview()
 
 		// Update estimated total pages
 		if msg.hasNext {
@@ -509,6 +568,26 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.previewURL = msg.url
 		}
+		return m, nil
+
+	case imagePreviewCompletedMsg:
+		// Image preview finished (success or error)
+		m.imageLoadingFile = ""
+		if msg.err != nil {
+			m.imagePreview = nil
+			m.isImagePreviewing = false
+			m.currentPreviewForce = false
+			m.setMessage(fmt.Sprintf("Image preview failed: %v", msg.err), messaging.MessageError)
+		} else {
+			m.imagePreview = msg.preview
+			if msg.preview != nil {
+				m.isImagePreviewing = true
+			}
+		}
+		return m, nil
+
+	case imagePreviewClearedMsg:
+		// No-op placeholder to trigger rerender
 		return m, nil
 
 	case bucketSelectorClosedMsg:
@@ -559,12 +638,43 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update help viewport size
 		m.helpViewport.Width = min(60, msg.Width-10)
 		m.helpViewport.Height = min(15, msg.Height-10)
+		// Update image preview area size (right panel interior)
+		rightPanelWidth := msg.Width - leftPanelWidth - 2
+		infoRows := 10
+		if infoRows > m.viewportHeight-3 {
+			infoRows = max(3, m.viewportHeight/3)
+		}
+		m.imageAreaCols = max(1, rightPanelWidth-4)
+		m.imageAreaRows = max(1, m.viewportHeight-infoRows-2)
+		// 文本模式按字符网格渲染
+		m.imageManager.SetCellSize(m.imageAreaCols, m.imageAreaRows)
+		// Update modal size if open
+		if m.showingPreview && m.previewModal != nil {
+			m.previewModal.width = msg.Width
+			m.previewModal.height = msg.Height
+		}
 		return m, nil
 
 	case spinner.TickMsg:
+		// Route spinner ticks to preview modal first if open
+		if m.showingPreview && m.previewModal != nil {
+			newModal, cmd := m.previewModal.Update(msg)
+			if im, ok := newModal.(*ImagePreviewModel); ok {
+				m.previewModal = im
+			}
+			return m, cmd
+		}
+		var cmds []tea.Cmd
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.imageSpinner, cmd = m.imageSpinner.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case utils.DownloadStartedMsg:
 		logrus.Infof("Update: handling direct DownloadStartedMsg for file: %s", msg.Filename)
@@ -615,6 +725,16 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Reset upload state even on failure to clear cached paths
 		m.resetUploadState()
+		return m, nil
+
+	case modalClosedMsg:
+		m.showingPreview = false
+		m.previewModal = nil
+		m.imageManager.SetUseTextRender(true)
+		m.imageManager.SetCellSize(m.imageAreaCols, m.imageAreaRows)
+		m.clearInlinePreview()
+		m.lastPreviewFile = nil
+		m.lastPreviewForce = false
 		return m, nil
 
 	default:
@@ -681,8 +801,9 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		var cmd tea.Cmd
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
-		m.infoMessage = ""   // Clear info message on navigation
-		m.clearMessage()     // Clear status message on navigation
+		m.infoMessage = "" // Clear info message on navigation
+		m.clearMessage()   // Clear status message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel() // Update right panel on navigation
 		return m, cmd
 
@@ -693,8 +814,9 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		var cmd tea.Cmd
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
-		m.infoMessage = ""   // Clear info message on navigation
-		m.clearMessage()     // Clear status message on navigation
+		m.infoMessage = "" // Clear info message on navigation
+		m.clearMessage()   // Clear status message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel() // Update right panel on navigation
 		return m, cmd
 
@@ -706,6 +828,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = "" // Clear info message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel()
 		return m, cmd
 
@@ -717,6 +840,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = "" // Clear info message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel()
 		return m, cmd
 
@@ -728,6 +852,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = "" // Clear info message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel()
 		return m, cmd
 
@@ -739,6 +864,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.fileTable, cmd = m.fileTable.Update(msg)
 		m.cursor = m.fileTable.Cursor()
 		m.infoMessage = "" // Clear info message on navigation
+		m.clearInlinePreview()
 		m.updateRightPanel()
 		return m, cmd
 
@@ -824,6 +950,7 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.paginationLoading = true
 			m.cursor = 0
 			m.currentPage++
+			m.clearInlinePreview()
 			return m, m.loadFiles()
 		}
 
@@ -836,10 +963,17 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.cursor = 0
 			m.currentPage--
 			m.continuationToken = "" // Reset to load from beginning
+			m.clearInlinePreview()
 			// For previous page, we need to implement page stack or reload from start
 			// For simplicity, let's just reload from the first page and navigate
 			return m, m.loadFromPage(m.currentPage)
 		}
+
+	case key.Matches(msg, m.keyMap.ToggleImage):
+		return m.startPreviewModal(false)
+
+	case key.Matches(msg, m.keyMap.ForcePreview):
+		return m.startPreviewModal(true)
 
 	case key.Matches(msg, m.keyMap.Refresh):
 		if m.downloading || m.deleting {
@@ -888,6 +1022,49 @@ func (m *FileBrowserModel) handleNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	}
 
 	return m, nil
+}
+
+func (m *FileBrowserModel) startPreviewModal(force bool) (tea.Model, tea.Cmd) {
+	if m.downloading || m.deleting {
+		return m, nil
+	}
+	if len(m.files) == 0 || m.cursor >= len(m.files) {
+		return m, nil
+	}
+	file := m.files[m.cursor]
+	if !m.imageManager.IsImageFile(file.ContentType) {
+		m.setMessage("Not an image file", messaging.MessageInfo)
+		return m, nil
+	}
+
+	fileCopy := file
+	m.lastPreviewFile = &fileCopy
+	m.lastPreviewForce = force
+	m.isImagePreviewing = false
+	m.imagePreview = nil
+	m.imageLoadingFile = ""
+	m.currentPreviewForce = force
+
+	logrus.WithFields(logrus.Fields{
+		"file":  file.Key,
+		"force": force,
+	}).Info("opening image preview")
+
+	m.showingPreview = true
+	m.previewModal = NewImagePreviewModel(m.imageManager, file, m.windowWidth, m.windowHeight, force)
+
+	if force {
+		m.setMessage("Refreshing preview from R2", messaging.MessageInfo)
+	}
+
+	return m, m.previewModal.Init()
+}
+
+func (m *FileBrowserModel) clearInlinePreview() {
+	m.isImagePreviewing = false
+	m.imagePreview = nil
+	m.imageLoadingFile = ""
+	m.currentPreviewForce = false
 }
 
 // handleDeleteConfirmation handles delete confirmation dialog
@@ -1002,6 +1179,11 @@ func (m *FileBrowserModel) View() string {
 		return m.renderFloatingDialog(baseView, m.renderHelpDialog())
 	}
 
+	if m.showingPreview && m.previewModal != nil {
+		// Show modal as full-screen content to avoid extra centering
+		return m.previewModal.View()
+	}
+
 	if m.showingBucketSelector && m.bucketSelector != nil {
 		return m.renderFloatingDialog(baseView, m.bucketSelector.View())
 	}
@@ -1052,7 +1234,7 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 		}
 
 		if m.currentPage > 1 {
-			pageInfo += " (p: prev)"
+			pageInfo += " (b: prev)"
 		}
 		if m.hasNextPage {
 			pageInfo += " (n: next)"
@@ -1072,16 +1254,16 @@ func (m *FileBrowserModel) renderLeftPanel(width int) string {
 
 // renderRightPanel renders the right panel with file info
 func (m *FileBrowserModel) renderRightPanel(width int) string {
-	var b strings.Builder
+	var content strings.Builder
 
-	// Create unified panel style matching left panel
+	// Panel dimensions
 	panelWidth := width - tuiconfig.DefaultViewportPadding // Account for border
 	panelHeight := m.viewportHeight
 
-	// Title with consistent styling
+	// Title
 	titleStyle := theme.CreateSectionHeaderStyle()
-	b.WriteString(titleStyle.Render("📋 File Information"))
-	b.WriteString("\n")
+	content.WriteString(titleStyle.Render("📋 File Information"))
+	content.WriteString("\n")
 
 	// Show file info if a file is selected
 	if len(m.files) > 0 && m.cursor < len(m.files) {
@@ -1091,44 +1273,44 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		infoStyle := theme.CreateInfoTextStyle()
 
 		// File details with emojis
-		b.WriteString(infoStyle.Render(fmt.Sprintf("📄 Name: %s", file.Key)))
-		b.WriteString("\n")
-		b.WriteString(infoStyle.Render(fmt.Sprintf("📊 Size: %s", formatFileSize(file.Size))))
-		b.WriteString("\n")
-		b.WriteString(infoStyle.Render(fmt.Sprintf("%s Type: %s", m.getCategoryEmoji(file.Category), file.Category)))
-		b.WriteString("\n")
-		b.WriteString(infoStyle.Render(fmt.Sprintf("🏷️ Content-Type: %s", file.ContentType)))
-		b.WriteString("\n")
-		b.WriteString(infoStyle.Render(fmt.Sprintf("🕒 Modified: %s", file.LastModified.Format("2006-01-02 15:04:05"))))
-		b.WriteString("\n\n")
+		content.WriteString(infoStyle.Render(fmt.Sprintf("📄 Name: %s", file.Key)))
+		content.WriteString("\n")
+		content.WriteString(infoStyle.Render(fmt.Sprintf("📊 Size: %s", formatFileSize(file.Size))))
+		content.WriteString("\n")
+		content.WriteString(infoStyle.Render(fmt.Sprintf("%s Type: %s", m.getCategoryEmoji(file.Category), file.Category)))
+		content.WriteString("\n")
+		content.WriteString(infoStyle.Render(fmt.Sprintf("🏷️ Content-Type: %s", file.ContentType)))
+		content.WriteString("\n")
+		content.WriteString(infoStyle.Render(fmt.Sprintf("🕒 Modified: %s", file.LastModified.Format("2006-01-02 15:04:05"))))
+		content.WriteString("\n\n")
 
 		// Custom domain URL section if configured
 		customURL := m.urlGenerator.GenerateCustomDomainURL(file.Key)
 		if customURL != "" {
 			urlSectionStyle := theme.CreateURLSectionStyle()
 
-			b.WriteString(urlSectionStyle.Render("🔗 Custom URL:"))
-			b.WriteString("\n")
+			content.WriteString(urlSectionStyle.Render("🔗 Custom URL:"))
+			content.WriteString("\n")
 
 			// Make URL clickable with OSC 8 escape sequence
 			clickableURL := m.makeClickableURL(customURL, customURL)
 
 			// Display URL with terminal-compatible colors
 			coloredURL := theme.FormatClickableURL(clickableURL, customURL)
-			b.WriteString(coloredURL)
-			b.WriteString("\n")
+			content.WriteString(coloredURL)
+			content.WriteString("\n")
 
 			hintStyle := theme.CreateHintStyle()
-			b.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
-			b.WriteString("\n\n")
+			content.WriteString(hintStyle.Render("💡 Click to open or use Ctrl+O to copy, use v to generate Presigned URL"))
+			content.WriteString("\n\n")
 		}
 
 		// Preview URL section if generated
 		if m.previewURL != "" {
 			previewSectionStyle := theme.CreatePreviewURLSectionStyle()
 
-			b.WriteString(previewSectionStyle.Render("⏱️ Presigned URL:"))
-			b.WriteString("\n")
+			content.WriteString(previewSectionStyle.Render("⏱️ Presigned URL:"))
+			content.WriteString("\n")
 
 			// Use hyperlink format for long URLs - display filename as clickable link
 			filename := filepath.Base(file.Key)
@@ -1137,12 +1319,12 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 
 			// Display hyperlink with terminal-compatible colors
 			coloredURL := theme.FormatClickableURL(clickablePreviewURL, m.previewURL)
-			b.WriteString(coloredURL)
-			b.WriteString("\n")
+			content.WriteString(coloredURL)
+			content.WriteString("\n")
 
 			hintStyle := theme.CreateHintStyle()
-			b.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
-			b.WriteString("\n")
+			content.WriteString(hintStyle.Render("⏰ Valid for 1 hour • Click to open or use Ctrl+Y to copy"))
+			content.WriteString("\n")
 		}
 
 	} else {
@@ -1150,11 +1332,39 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		emptyStyle := theme.CreateInfoTextStyle().
 			Align(lipgloss.Center)
 
-		b.WriteString(emptyStyle.Render("Select a file to view details"))
-		b.WriteString("\n")
+		content.WriteString(emptyStyle.Render("Select a file to view details"))
+		content.WriteString("\n")
 	}
 
-	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(b.String())
+	// 附加预览（在同一个带边框的面板内容里），保证整体高度受控
+	if m.isImagePreviewing && len(m.files) > 0 && m.cursor < len(m.files) {
+		file := m.files[m.cursor]
+		content.WriteString("\n")
+		content.WriteString(titleStyle.Render("🖼 Preview"))
+		content.WriteString("\n")
+		if m.imageLoadingFile == file.Key && m.imagePreview == nil {
+			loadingStyle := theme.CreateLoadingStyle()
+			content.WriteString(loadingStyle.Render(fmt.Sprintf("%s Loading image preview...", m.imageSpinner.View())))
+			content.WriteString("\n")
+		}
+		if m.imagePreview != nil && m.imagePreview.FileKey == file.Key {
+			// 显示来源提示
+			hintStyle := theme.CreateHintStyle()
+			source := "Preview downloaded from R2"
+			if m.imagePreview.CacheHit {
+				source = "Preview served from cache"
+			} else if m.currentPreviewForce {
+				source = "Preview refreshed from R2"
+			}
+			content.WriteString(hintStyle.Render(source))
+			content.WriteString("\n")
+			// 预览是 ANSI 文本，直接放入内容中
+			content.WriteString(m.imagePreview.RenderedData)
+			content.WriteString("\x1b[0m")
+		}
+	}
+
+	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(content.String())
 }
 
 // renderFloatingDialog renders a dialog floating over the base view while keeping base visible
@@ -1367,6 +1577,44 @@ type previewURLGeneratedMsg struct {
 
 type bucketSelectorClosedMsg struct{}
 
+// Image preview related messages
+type imagePreviewStartedMsg struct {
+	fileKey string
+}
+
+type imagePreviewCompletedMsg struct {
+	preview *image.ImagePreview
+	err     error
+}
+
+type imagePreviewClearedMsg struct{}
+
+// previewImageCmd triggers image preview generation via ImageManager
+func (m *FileBrowserModel) previewImageCmd(file FileItem, force bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		// Map to image.FileItem for the image manager
+		item := image.FileItem{
+			Key:          file.Key,
+			Size:         file.Size,
+			LastModified: file.LastModified,
+			ContentType:  file.ContentType,
+			Category:     file.Category,
+		}
+		var (
+			preview *image.ImagePreview
+			err     error
+		)
+		if force {
+			preview, err = m.imageManager.PreviewImageForce(ctx, file.Key, item)
+		} else {
+			preview, err = m.imageManager.PreviewImage(ctx, file.Key, item)
+		}
+		return imagePreviewCompletedMsg{preview: preview, err: err}
+	}
+}
+
 // loadFiles loads files from R2
 func (m *FileBrowserModel) loadFiles() tea.Cmd {
 	return func() tea.Msg {
@@ -1572,6 +1820,13 @@ func formatFileSize(bytes int64) string {
 
 func min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b
