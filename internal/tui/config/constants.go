@@ -18,7 +18,7 @@ const (
 
 	// Dialog dimensions
 	DialogDefaultWidth    = 50
-	DialogLargeWidth      = 70
+	DialogLargeWidth      = 90
 	FilePickerDialogWidth = 80
 	DialogDefaultPadding  = 2
 
