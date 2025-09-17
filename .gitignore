@@ -53,3 +53,8 @@ download_test.log
 vendor/
 
 .kiro
+prompts/
+specs/
+.spec-workflow/
+.workflow-confirmations.json
+

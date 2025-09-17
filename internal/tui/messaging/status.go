@@ -50,7 +50,7 @@ func (sm *StatusManagerImpl) SetMessage(message string, msgType MessageType) {
 	sm.statusMessage = message
 	sm.messageType = msgType
 	sm.messageTimer = time.Now()
-	
+
 	// Debug logging
 	logrus.Debugf("StatusManager: setMessage called with message='%s', type=%d", message, msgType)
 }
