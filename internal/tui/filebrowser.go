@@ -157,8 +157,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("y", "yes"),
 		),
 		Cancel: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "no"),
+			key.WithKeys("N"),
+			key.WithHelp("N", "no"),
 		),
 		CopyCustom: key.NewBinding(
 			key.WithKeys("ctrl+o"),
@@ -186,6 +186,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.CopyCustom, k.CopyPresign},
 		{k.ChangeBucket},
 		{k.NextPage, k.PrevPage, k.ToggleImage, k.ForcePreview},
+		{k.Confirm, k.Cancel},
 		{k.Help, k.Quit},
 	}
 }
@@ -361,10 +362,10 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 
 	// Initialize help
 	h := help.New()
-	h.ShowAll = false
+	h.ShowAll = true
 
 	// Initialize help viewport
-	vp := viewport.New(60, 15)
+	vp := viewport.New(80, 25)
 	vp.Style = lipgloss.NewStyle().
 		Border(theme.BorderStyleUnified).
 		BorderForeground(lipgloss.Color(theme.ColorBrightBlue)).
@@ -636,8 +637,10 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateTableSize(leftPanelWidth, m.viewportHeight)
 
 		// Update help viewport size
-		m.helpViewport.Width = min(60, msg.Width-10)
-		m.helpViewport.Height = min(15, msg.Height-10)
+		m.helpViewport.Width = min(80, msg.Width-10)
+		m.helpViewport.Height = min(25, msg.Height-6)
+		// Update help component width
+		m.help.Width = min(80, msg.Width-10)
 		// Update image preview area size (right panel interior)
 		rightPanelWidth := msg.Width - leftPanelWidth - 2
 		infoRows := 10
@@ -1087,8 +1090,76 @@ func (m *FileBrowserModel) handleDeleteConfirmation(msg tea.KeyMsg) (tea.Model, 
 
 // setupHelpViewport sets up the help viewport with content
 func (m *FileBrowserModel) setupHelpViewport() {
-	helpContent := m.help.View(m.keyMap)
-	m.helpViewport.SetContent(helpContent)
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(theme.ColorBrightCyan)).
+		MarginBottom(1).
+		Render("🚀 R2 File Browser - Help")
+
+	// Create custom help content instead of relying on bubbles help component
+	helpContent := m.renderCustomHelp()
+
+	// Create content with title and help
+	content := lipgloss.JoinVertical(lipgloss.Left, title, helpContent)
+	m.helpViewport.SetContent(content)
+}
+
+// renderCustomHelp creates a custom help display with all key bindings
+func (m *FileBrowserModel) renderCustomHelp() string {
+	var lines []string
+
+	format := func(keys, desc string) string {
+		return fmt.Sprintf("%-16s %s", keys, desc)
+	}
+
+	// Section 1: Navigation
+	lines = append(lines, "Navigation")
+	lines = append(lines, format("↑/k", "move up"))
+	lines = append(lines, format("↓/j", "move down"))
+	lines = append(lines, format("pgup", "page up"))
+	lines = append(lines, format("pgdn", "page down"))
+	lines = append(lines, format("home/g", "go to start"))
+	lines = append(lines, format("end/G", "go to end"))
+	lines = append(lines, "")
+
+	// Section 2: Pagination
+	lines = append(lines, "Paging")
+	lines = append(lines, format("n", "next page"))
+	lines = append(lines, format("b", "prev page"))
+	lines = append(lines, "")
+
+	// Section 3: File actions
+	lines = append(lines, "File Actions")
+	lines = append(lines, format("d", "download"))
+	lines = append(lines, format("v", "preview URL"))
+	lines = append(lines, format("p", "preview image"))
+	lines = append(lines, format("P", "force preview"))
+	lines = append(lines, format("x", "delete"))
+	lines = append(lines, format("y", "confirm delete"))
+	lines = append(lines, format("N", "cancel delete"))
+	lines = append(lines, "")
+
+	// Section 4: Search & upload
+	lines = append(lines, "Search & Upload")
+	lines = append(lines, format("s", "search"))
+	lines = append(lines, format("l", "clear search"))
+	lines = append(lines, format("u", "upload"))
+	lines = append(lines, format("c", "change bucket"))
+	lines = append(lines, "")
+
+	// Section 5: Sharing
+	lines = append(lines, "Sharing")
+	lines = append(lines, format("ctrl+o", "copy custom URL"))
+	lines = append(lines, format("ctrl+y", "copy presigned URL"))
+	lines = append(lines, "")
+
+	// Section 6: Misc
+	lines = append(lines, "Misc")
+	lines = append(lines, format("r/f5", "refresh"))
+	lines = append(lines, format("?/h", "toggle help"))
+	lines = append(lines, format("q/esc", "quit"))
+
+	return strings.Join(lines, "\n")
 }
 
 // View implements the bubbletea.Model interface
@@ -1445,8 +1516,8 @@ func (m *FileBrowserModel) renderHelpDialog() string {
 
 	title := titleStyle.Render("🚀 R2 File Browser - Help")
 
-	// Get help content from bubbles help component
-	helpContent := m.help.FullHelpView(m.keyMap.FullHelp())
+	// Render custom help content to avoid truncated columns
+	helpContent := m.renderCustomHelp()
 
 	// Create content with title and help
 	content := lipgloss.JoinVertical(lipgloss.Left, title, helpContent)
