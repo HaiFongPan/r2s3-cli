@@ -109,7 +109,13 @@ func (m *ImagePreviewModel) Init() tea.Cmd {
 			if col > m.width {
 				col = m.width
 			}
-			row := 5 // three header lines + hint line + cache info line
+			// Calculate row position dynamically: name + status + hint + cache + separator + margin
+			row := 4 // base: name, status, hint lines
+			if m.forceReload || !m.forceReload { // cacheInfo will be shown
+				row++
+			}
+			row++ // separator line
+			row++ // extra margin for better spacing
 
 			if m.forceReload {
 				preview, err = m.manager.PreviewImageAtForce(ctx, m.file.Key, item, col, row)
@@ -181,21 +187,33 @@ func (m *ImagePreviewModel) View() string {
 		Foreground(lipgloss.Color(theme.ColorBrightBlack)).
 		Render("q/esc/p/P to close • arrows to navigate when closed")
 
+	// Cache info with enhanced styling
 	cacheInfo := ""
 	if !m.loading && m.err == nil {
 		var source string
 		switch {
 		case m.forceReload && !m.cacheHit:
-			source = "Preview refreshed from R2"
+			source = "🔄 Preview refreshed from R2"
 		case m.cacheHit:
-			source = "Preview served from cache"
+			source = "⚡ Preview served from cache"
 		default:
-			source = "Preview downloaded from R2"
+			source = "📡 Preview downloaded from R2"
 		}
 		cacheInfo = theme.CreateHintStyle().
 			Width(m.width).
 			Align(lipgloss.Center).
 			Render(source)
+	}
+
+	// 装饰性分隔线（只有当有图片内容时才显示）
+	separator := ""
+	if !m.loading && m.err == nil && m.rendered != "" {
+		separatorStyle := lipgloss.NewStyle().
+			Width(m.width).
+			Align(lipgloss.Center).
+			Foreground(lipgloss.Color(theme.ColorBrightBlue)).
+			Bold(true)
+		separator = separatorStyle.Render("─────────────────── 🖼 ───────────────────")
 	}
 
 	// Image block, horizontally centered by left padding spaces only once
@@ -221,11 +239,15 @@ func (m *ImagePreviewModel) View() string {
 		if col > m.width {
 			col = m.width
 		}
-		// Start row after header, status, hint, cache info lines
-		row := 4
+		// Start row after header, status, hint, cache info, separator lines + margin
+		row := 4 // base: name, status, hint lines
 		if cacheInfo != "" {
 			row++
 		}
+		if separator != "" {
+			row++
+		}
+		row++ // extra margin for better spacing
 		// Move cursor to target row;column, then write image
 		imageBlock = fmt.Sprintf("\x1b[%d;%dH%s\x1b[0m", row, col, m.rendered)
 	}
@@ -240,6 +262,10 @@ func (m *ImagePreviewModel) View() string {
 	b.WriteString("\n")
 	if cacheInfo != "" {
 		b.WriteString(cacheInfo)
+		b.WriteString("\n")
+	}
+	if separator != "" {
+		b.WriteString(separator)
 		b.WriteString("\n")
 	}
 	if imageBlock != "" {

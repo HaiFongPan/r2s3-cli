@@ -341,35 +341,41 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		table.WithFocused(true),
 		table.WithStyles(table.Styles{
 			Header: lipgloss.NewStyle().
-				BorderStyle(lipgloss.NormalBorder()).
+				BorderStyle(lipgloss.RoundedBorder()).
 				BorderBottom(true).
 				BorderForeground(lipgloss.Color(theme.ColorBrightBlue)).
 				Foreground(lipgloss.Color(theme.ColorBrightCyan)).
-				Bold(true),
+				Bold(true).
+				Padding(0, 1),
 			Selected: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorText)).
-				Reverse(true).
-				Bold(true),
+				Background(lipgloss.Color(theme.ColorBrightCyan)).
+				Foreground(lipgloss.Color("#000000")).
+				Bold(true).
+				Padding(0, 1),
 			Cell: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorText)),
+				Foreground(lipgloss.Color(theme.ColorText)).
+				Padding(0, 1),
 		}),
 	)
 
-	// Initialize spinner for loading states
+	// Initialize spinner for loading states with Crush styling
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.ColorBrightYellow))
+	s.Style = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.ColorBrightBlue)).
+		Bold(true)
 
 	// Initialize help
 	h := help.New()
 	h.ShowAll = true
 
-	// Initialize help viewport
+	// Initialize help viewport with elegant styling
 	vp := viewport.New(80, 25)
 	vp.Style = lipgloss.NewStyle().
-		Border(theme.BorderStyleUnified).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(theme.ColorBrightBlue)).
-		Padding(1, 2)
+		Padding(2, 3).
+		Foreground(lipgloss.Color(theme.ColorText))
 
 	m := &FileBrowserModel{
 		client:              client,
@@ -406,8 +412,8 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 		searchQuery:  "",
 		isSearchMode: false,
 
-		// Upload state
-		uploadProgress: progress.New(progress.WithDefaultGradient()),
+		// Upload state with Crush styling
+		uploadProgress: progress.New(progress.WithSolidFill(theme.ColorBrightBlue)),
 		uploading:      false,
 		uploadingFile:  "",
 
@@ -683,8 +689,8 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logrus.Infof("Update: handling direct DownloadStartedMsg for file: %s", msg.Filename)
 		m.downloading = true
 		m.downloadingFile = msg.Filename
-		// Initialize progress bar for new download
-		m.downloadProgress = progress.New(progress.WithDefaultGradient())
+		// Initialize progress bar for new download with Crush styling
+		m.downloadProgress = progress.New(progress.WithSolidFill(theme.ColorBrightCyan))
 		// Don't call Init() here to avoid double rendering
 		return m, nil
 
@@ -1108,12 +1114,31 @@ func (m *FileBrowserModel) setupHelpViewport() {
 func (m *FileBrowserModel) renderCustomHelp() string {
 	var lines []string
 
+	// Crush-inspired formatting with colors
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.ColorBrightBlue)).
+		Bold(true)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.ColorText))
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.ColorBrightCyan)).
+		Bold(true).
+		MarginTop(1)
+
 	format := func(keys, desc string) string {
-		return fmt.Sprintf("%-16s %s", keys, desc)
+		return fmt.Sprintf("%-24s %s",
+			keyStyle.Render(keys),
+			descStyle.Render(desc))
+	}
+
+	formatSection := func(title string) string {
+		return sectionStyle.Render(title)
 	}
 
 	// Section 1: Navigation
-	lines = append(lines, "Navigation")
+	lines = append(lines, formatSection("Navigation"))
 	lines = append(lines, format("↑/k", "move up"))
 	lines = append(lines, format("↓/j", "move down"))
 	lines = append(lines, format("pgup", "page up"))
@@ -1123,13 +1148,13 @@ func (m *FileBrowserModel) renderCustomHelp() string {
 	lines = append(lines, "")
 
 	// Section 2: Pagination
-	lines = append(lines, "Paging")
+	lines = append(lines, formatSection("Paging"))
 	lines = append(lines, format("n", "next page"))
 	lines = append(lines, format("b", "prev page"))
 	lines = append(lines, "")
 
 	// Section 3: File actions
-	lines = append(lines, "File Actions")
+	lines = append(lines, formatSection("File Actions"))
 	lines = append(lines, format("d", "download"))
 	lines = append(lines, format("v", "preview URL"))
 	lines = append(lines, format("p", "preview image"))
@@ -1140,7 +1165,7 @@ func (m *FileBrowserModel) renderCustomHelp() string {
 	lines = append(lines, "")
 
 	// Section 4: Search & upload
-	lines = append(lines, "Search & Upload")
+	lines = append(lines, formatSection("Search & Upload"))
 	lines = append(lines, format("s", "search"))
 	lines = append(lines, format("l", "clear search"))
 	lines = append(lines, format("u", "upload"))
@@ -1148,13 +1173,13 @@ func (m *FileBrowserModel) renderCustomHelp() string {
 	lines = append(lines, "")
 
 	// Section 5: Sharing
-	lines = append(lines, "Sharing")
+	lines = append(lines, formatSection("Sharing"))
 	lines = append(lines, format("ctrl+o", "copy custom URL"))
 	lines = append(lines, format("ctrl+y", "copy presigned URL"))
 	lines = append(lines, "")
 
 	// Section 6: Misc
-	lines = append(lines, "Misc")
+	lines = append(lines, formatSection("Misc"))
 	lines = append(lines, format("r/f5", "refresh"))
 	lines = append(lines, format("?/h", "toggle help"))
 	lines = append(lines, format("q/esc", "quit"))
@@ -1429,9 +1454,22 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			}
 			content.WriteString(hintStyle.Render(source))
 			content.WriteString("\n")
+
+			// 添加装饰性分隔线
+			separatorStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(theme.ColorBrightBlue)).
+				Bold(true)
+			separator := separatorStyle.Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			content.WriteString(separator)
+			content.WriteString("\n\n")
+
 			// 预览是 ANSI 文本，直接放入内容中
 			content.WriteString(m.imagePreview.RenderedData)
 			content.WriteString("\x1b[0m")
+
+			// 底部装饰线
+			content.WriteString("\n")
+			content.WriteString(separator)
 		}
 	}
 
@@ -1470,9 +1508,11 @@ func (m *FileBrowserModel) renderFloatingDialog(baseView, dialog string) string 
 
 // renderDownloadProgress renders the download progress dialog
 func (m *FileBrowserModel) renderDownloadProgress() string {
-	dialogStyle := theme.CreateDialogStyle(tuiconfig.DialogDefaultWidth, theme.ColorBrightCyan)
+	dialogStyle := theme.CreateDialogStyle(tuiconfig.DialogDefaultWidth, theme.ColorBrightBlue)
 
-	titleStyle := theme.CreateSectionHeaderStyle().
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(theme.ColorBrightBlue)).
 		Align(lipgloss.Center).
 		MarginBottom(1)
 
@@ -1480,8 +1520,11 @@ func (m *FileBrowserModel) renderDownloadProgress() string {
 	b.WriteString(titleStyle.Render("📥 Downloading File"))
 	b.WriteString("\n\n")
 
-	// Show filename
-	filenameStyle := theme.CreateInfoTextStyle().Align(lipgloss.Center)
+	// Show filename with Crush styling
+	filenameStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.ColorBrightCyan)).
+		Bold(true).
+		Align(lipgloss.Center)
 	b.WriteString(filenameStyle.Render(fmt.Sprintf("File: %s", m.downloadingFile)))
 	b.WriteString("\n\n")
 

@@ -4,23 +4,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// CreateUnifiedPanelStyle creates a consistent panel style
+// CreateUnifiedPanelStyle creates a consistent panel style with Crush elegance
 func CreateUnifiedPanelStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		Border(BorderStyleUnified).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(ColorBrightBlue)).
-		Padding(1).
+		Padding(1, 2).
 		Foreground(lipgloss.Color(ColorText))
 }
 
-// CreateSectionHeaderStyle creates a consistent section header style
+// CreateSectionHeaderStyle creates a glamorous section header style
 func CreateSectionHeaderStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ColorBrightCyan)).
-		MarginBottom(1)
+		MarginBottom(1).
+		PaddingLeft(1)
 }
 
 // CreateInfoTextStyle creates a consistent info text style
@@ -36,11 +37,11 @@ func CreateSecondaryTextStyle() lipgloss.Style {
 		Italic(true)
 }
 
-// CreateDialogStyle creates a consistent dialog style
+// CreateDialogStyle creates an elegant dialog style with Crush aesthetics
 func CreateDialogStyle(width int, borderColor string) lipgloss.Style {
 	style := lipgloss.NewStyle().
-		Border(BorderStyleUnified).
-		Padding(2, 3).
+		Border(lipgloss.RoundedBorder()).
+		Padding(3, 4).
 		Width(width).
 		Align(lipgloss.Center).
 		Foreground(lipgloss.Color(ColorText))
@@ -54,13 +55,14 @@ func CreateDialogStyle(width int, borderColor string) lipgloss.Style {
 	return style
 }
 
-// CreateHeaderStyle creates a consistent header style
+// CreateHeaderStyle creates a glamorous header style
 func CreateHeaderStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(ColorBrightCyan)).
 		MarginBottom(1).
-		MarginLeft(1) // Align with left panel border
+		MarginLeft(2).
+		PaddingLeft(1)
 }
 
 // CreateFooterStyle creates a consistent footer style
@@ -79,4 +81,30 @@ func CreateLoadingStyle() lipgloss.Style {
 // CreateErrorStyle creates a consistent error style
 func CreateErrorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(ColorBrightRed))
+}
+
+// CreateHighlightStyle creates a Crush-inspired highlight style
+func CreateHighlightStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color(ColorBrightBlue)).
+		Foreground(lipgloss.Color(ColorWhite)).
+		Padding(0, 1).
+		Bold(true)
+}
+
+// CreateCardStyle creates an elegant card-like container
+func CreateCardStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ColorBrightBlack)).
+		Padding(1, 2).
+		Width(width).
+		Foreground(lipgloss.Color(ColorText))
+}
+
+// CreateAccentTextStyle creates emphasized accent text
+func CreateAccentTextStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorBrightBlue)).
+		Bold(true)
 }

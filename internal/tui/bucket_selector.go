@@ -297,14 +297,17 @@ func (m *BucketSelectorModel) renderBucketList() string {
 		var style lipgloss.Style
 
 		if i == m.selectedIndex {
-			prefix = "> "
+			prefix = "▶ "
 			style = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFEB3B")).
-				Bold(true)
+				Background(lipgloss.Color(theme.ColorBrightBlue)).
+				Foreground(lipgloss.Color(theme.ColorWhite)).
+				Bold(true).
+				Padding(0, 1)
 		} else {
 			prefix = "  "
 			style = lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorText))
+				Foreground(lipgloss.Color(theme.ColorText)).
+				Padding(0, 1)
 		}
 
 		// Add main bucket indicator
@@ -317,7 +320,8 @@ func (m *BucketSelectorModel) renderBucketList() string {
 		bucketLine := prefix + bucket.Name
 		if bucket.Error != "" {
 			bucketLine += lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FF5555")).
+				Foreground(lipgloss.Color(theme.ColorBrightRed)).
+				Italic(true).
 				Render(fmt.Sprintf(" (%s)", bucket.Error))
 		}
 

@@ -1,31 +1,31 @@
 package theme
 
-// Terminal-compatible color constants using ANSI standard colors
-// These colors work consistently across different terminal themes
+// Crush-inspired glamorous color palette
+// Sophisticated colors that make the command line beautiful
 const (
-	// Primary colors (ANSI standard - adaptive to terminal theme)
-	ColorText         = ""        // Use terminal's default foreground color
-	ColorWhite        = "15"      // ANSI 15 - bright white, better contrast
-	ColorBrightBlack  = "8"       // ANSI 8 - bright black/gray
-	ColorHint         = "240"     // ANSI 240 - darker gray for hints
-	ColorBrightBlue   = "12"      // ANSI 12 - bright blue
-	ColorBrightCyan   = "14"      // ANSI 14 - bright cyan
-	ColorBrightGreen  = "10"      // ANSI 10 - bright green
-	ColorBrightYellow = "11"      // ANSI 11 - bright yellow
-	ColorBrightRed    = "9"       // ANSI 9 - bright red
+	// Primary Crush color palette - sophisticated and glamorous
+	ColorText         = "#FAFAFA" // Crush primary text - elegant off-white
+	ColorWhite        = "#FFFFFF" // Pure white for high contrast elements
+	ColorBrightBlack  = "#6B7280" // Refined gray for secondary text
+	ColorHint         = "#9CA3AF" // Subtle gray for hints and disabled text
+	ColorBrightBlue   = "#7D56F4" // Crush signature purple - primary accent
+	ColorBrightCyan   = "#06D6A0" // Vibrant teal - secondary accent
+	ColorBrightGreen  = "#10B981" // Success green - modern and clean
+	ColorBrightYellow = "#F59E0B" // Warning amber - warm and visible
+	ColorBrightRed    = "#EF4444" // Error red - clear and striking
 
-	// File type colors (using ANSI palette)
-	ColorFileImage        = "#74C0FC" // Light blue
-	ColorFileDocument     = "#51CF66" // Green
-	ColorFileSpreadsheet  = "#69DB7C" // Light green
-	ColorFilePresentation = "#FFD43B" // Yellow
-	ColorFileArchive      = "#FCC419" // Amber
-	ColorFileVideo        = "#FF8787" // Light red
-	ColorFileAudio        = "#DA77F2" // Purple
-	ColorFileText         = "#74C0FC" // Cyan
-	ColorFileCode         = "#B197FC" // Light purple
-	ColorFileData         = "#74C0FC" // Light blue
-	ColorFileFont         = "#FFB3BA" // Light pink
+	// File type colors - Crush-inspired sophisticated palette
+	ColorFileImage        = "#8B5CF6" // Rich purple for images
+	ColorFileDocument     = "#10B981" // Clean green for documents
+	ColorFileSpreadsheet  = "#06D6A0" // Vibrant teal for spreadsheets
+	ColorFilePresentation = "#F59E0B" // Warm amber for presentations
+	ColorFileArchive      = "#EC4899" // Bright pink for archives
+	ColorFileVideo        = "#EF4444" // Rich red for videos
+	ColorFileAudio        = "#A855F7" // Deep purple for audio
+	ColorFileText         = "#06B6D4" // Sky blue for text files
+	ColorFileCode         = "#7D56F4" // Signature purple for code
+	ColorFileData         = "#3B82F6" // Bright blue for data
+	ColorFileFont         = "#EC4899" // Pink for fonts
 )
 
 // GetFileColor returns the color for a given file category

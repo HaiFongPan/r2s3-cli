@@ -2,18 +2,26 @@ package theme
 
 import "github.com/charmbracelet/lipgloss"
 
-// Border styles using Unicode box drawing characters
+// Border styles with Crush-inspired elegance
 var (
-	BorderStyleUnified = lipgloss.Border{
+	// Legacy unified border for backward compatibility
+	BorderStyleUnified = lipgloss.RoundedBorder()
+
+	// Elegant separator for panels
+	BorderStyleSeparator = "│"
+
+	// Refined borders for different use cases
+	BorderStyleCard = lipgloss.Border{
 		Top:         "─",
 		Bottom:      "─",
 		Left:        "│",
 		Right:       "│",
-		TopLeft:     "┌",
-		TopRight:    "┐",
-		BottomLeft:  "└",
-		BottomRight: "┘",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "╰",
+		BottomRight: "╯",
 	}
 
-	BorderStyleSeparator = "│"
+	// Double border for emphasis
+	BorderStyleEmphasized = lipgloss.DoubleBorder()
 )

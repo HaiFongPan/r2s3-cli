@@ -16,6 +16,46 @@ func CreateProgressBarStyle() lipgloss.Style {
 		Padding(1)
 }
 
+// CreateCrushProgressOptions creates Crush-styled progress bar options
+func CreateCrushProgressOptions() []ProgressOption {
+	return []ProgressOption{
+		WithSolidFill(ColorBrightBlue),
+		WithEmptyFill(ColorBrightBlack),
+		WithoutPercentage(),
+	}
+}
+
+// ProgressOption represents a progress bar configuration option
+type ProgressOption func(*ProgressConfig)
+
+// ProgressConfig holds progress bar styling configuration
+type ProgressConfig struct {
+	SolidFill      string
+	EmptyFill      string
+	ShowPercentage bool
+}
+
+// WithSolidFill sets the filled portion color
+func WithSolidFill(color string) ProgressOption {
+	return func(c *ProgressConfig) {
+		c.SolidFill = color
+	}
+}
+
+// WithEmptyFill sets the empty portion color
+func WithEmptyFill(color string) ProgressOption {
+	return func(c *ProgressConfig) {
+		c.EmptyFill = color
+	}
+}
+
+// WithoutPercentage hides the percentage display
+func WithoutPercentage() ProgressOption {
+	return func(c *ProgressConfig) {
+		c.ShowPercentage = false
+	}
+}
+
 // CreateProgressTextStyle creates a style for progress text
 func CreateProgressTextStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
