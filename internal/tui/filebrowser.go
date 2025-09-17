@@ -346,11 +346,11 @@ func NewFileBrowserModel(client *r2.Client, cfg *config.Config, bucketName, pref
 				Foreground(lipgloss.Color(theme.ColorBrightCyan)).
 				Bold(true),
 			Selected: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorWhite)).
+				Foreground(lipgloss.Color(theme.ColorText)).
 				Reverse(true).
 				Bold(true),
 			Cell: lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorWhite)),
+				Foreground(lipgloss.Color(theme.ColorText)),
 		}),
 	)
 

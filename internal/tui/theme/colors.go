@@ -3,14 +3,16 @@ package theme
 // Terminal-compatible color constants using ANSI standard colors
 // These colors work consistently across different terminal themes
 const (
-	// Primary colors (ANSI standard)
-	ColorWhite        = "#FFFFFF" // ANSI 15 - primary text
-	ColorBrightBlack  = "#808080" // ANSI 8 - secondary text
-	ColorBrightBlue   = "#5C7CFA" // ANSI 12 - primary accent
-	ColorBrightCyan   = "#51CF66" // ANSI 14 - secondary accent
-	ColorBrightGreen  = "#51CF66" // ANSI 10 - success/links
-	ColorBrightYellow = "#FFD43B" // ANSI 11 - warning
-	ColorBrightRed    = "#FF6B6B" // ANSI 9 - error
+	// Primary colors (ANSI standard - adaptive to terminal theme)
+	ColorText         = ""        // Use terminal's default foreground color
+	ColorWhite        = "15"      // ANSI 15 - bright white, better contrast
+	ColorBrightBlack  = "8"       // ANSI 8 - bright black/gray
+	ColorHint         = "240"     // ANSI 240 - darker gray for hints
+	ColorBrightBlue   = "12"      // ANSI 12 - bright blue
+	ColorBrightCyan   = "14"      // ANSI 14 - bright cyan
+	ColorBrightGreen  = "10"      // ANSI 10 - bright green
+	ColorBrightYellow = "11"      // ANSI 11 - bright yellow
+	ColorBrightRed    = "9"       // ANSI 9 - bright red
 
 	// File type colors (using ANSI palette)
 	ColorFileImage        = "#74C0FC" // Light blue
@@ -52,7 +54,7 @@ func GetFileColor(category string) string {
 	case "font":
 		return ColorFileFont
 	default:
-		return ColorWhite
+		return ColorText
 	}
 }
 

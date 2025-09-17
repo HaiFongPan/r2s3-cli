@@ -12,7 +12,7 @@ func CreateUnifiedPanelStyle(width, height int) lipgloss.Style {
 		Border(BorderStyleUnified).
 		BorderForeground(lipgloss.Color(ColorBrightBlue)).
 		Padding(1).
-		Foreground(lipgloss.Color(ColorWhite))
+		Foreground(lipgloss.Color(ColorText))
 }
 
 // CreateSectionHeaderStyle creates a consistent section header style
@@ -26,7 +26,7 @@ func CreateSectionHeaderStyle() lipgloss.Style {
 // CreateInfoTextStyle creates a consistent info text style
 func CreateInfoTextStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(ColorWhite))
+		Foreground(lipgloss.Color(ColorText))
 }
 
 // CreateSecondaryTextStyle creates a consistent secondary text style
@@ -43,7 +43,7 @@ func CreateDialogStyle(width int, borderColor string) lipgloss.Style {
 		Padding(2, 3).
 		Width(width).
 		Align(lipgloss.Center).
-		Foreground(lipgloss.Color(ColorWhite))
+		Foreground(lipgloss.Color(ColorText))
 
 	if borderColor != "" {
 		style = style.BorderForeground(lipgloss.Color(borderColor))

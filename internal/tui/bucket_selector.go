@@ -14,6 +14,7 @@ import (
 
 	"github.com/HaiFongPan/r2s3-cli/internal/config"
 	"github.com/HaiFongPan/r2s3-cli/internal/r2"
+	"github.com/HaiFongPan/r2s3-cli/internal/tui/theme"
 )
 
 // BucketItem represents a bucket in the selector
@@ -303,7 +304,7 @@ func (m *BucketSelectorModel) renderBucketList() string {
 		} else {
 			prefix = "  "
 			style = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF"))
+				Foreground(lipgloss.Color(theme.ColorText))
 		}
 
 		// Add main bucket indicator

@@ -37,5 +37,6 @@ func FormatClickableURL(displayText, url string) string {
 
 // CreateHintStyle creates a style for URL hints and tips
 func CreateHintStyle() lipgloss.Style {
-	return CreateSecondaryTextStyle()
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorHint))
 }
