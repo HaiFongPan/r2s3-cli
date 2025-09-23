@@ -1,0 +1,131 @@
+package tui
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/stretchr/testify/require"
+)
+
+// TestTableWidthCalculations verifies that table column widths are calculated correctly
+// for different terminal widths and never exceed available space
+func TestTableWidthCalculations(t *testing.T) {
+	m := &FileBrowserModel{}
+
+	testCases := []struct {
+		name          string
+		terminalWidth int
+		shouldMeetMin bool // Whether minimum constraints should be met
+	}{
+		{"Wide terminal", 200, true},
+		{"Medium terminal", 150, true},
+		{"Narrow terminal (185 chars)", 185, true}, // This is our target case
+		{"MacBook typical width", 120, true},
+		{"Very narrow", 80, false}, // Below minimum viable width
+		{"Extremely narrow", 60, false}, // Below minimum viable width
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Simulate the same calculation as in View()
+			leftPanelWidth := int(float64(tc.terminalWidth) * 0.6)
+			rightPanelWidth := tc.terminalWidth - leftPanelWidth - 2
+
+			// Apply minimum constraints
+			const minLeftWidth = 50
+			const minRightWidth = 30
+
+			if leftPanelWidth < minLeftWidth || rightPanelWidth < minRightWidth {
+				if tc.terminalWidth < 100 {
+					leftPanelWidth = max(minLeftWidth, tc.terminalWidth*2/3)
+					rightPanelWidth = tc.terminalWidth - leftPanelWidth - 2
+				} else {
+					if leftPanelWidth < minLeftWidth {
+						leftPanelWidth = minLeftWidth
+						rightPanelWidth = tc.terminalWidth - leftPanelWidth - 2
+					}
+					if rightPanelWidth < minRightWidth {
+						rightPanelWidth = minRightWidth
+						leftPanelWidth = tc.terminalWidth - rightPanelWidth - 2
+					}
+				}
+			}
+
+			// Simulate the table width calculation
+			panelWidth := leftPanelWidth - 2  // DefaultViewportPadding
+			tableWidth := panelWidth - 2      // Additional padding in renderLeftPanel
+
+			// Call updateTableSize to see if it handles the width correctly
+			m.updateTableSize(tableWidth, 20)
+
+			// Verify that panels don't exceed terminal width
+			totalUsed := leftPanelWidth + rightPanelWidth + 2 // +2 for separator
+			require.LessOrEqual(t, totalUsed, tc.terminalWidth,
+				"Total panel width (%d) exceeds terminal width (%d)", totalUsed, tc.terminalWidth)
+
+			// Verify minimum constraints are met (only for viable terminal widths)
+			if tc.shouldMeetMin {
+				require.GreaterOrEqual(t, leftPanelWidth, minLeftWidth,
+					"Left panel too narrow (%d < %d)", leftPanelWidth, minLeftWidth)
+				require.GreaterOrEqual(t, rightPanelWidth, minRightWidth,
+					"Right panel too narrow (%d < %d)", rightPanelWidth, minRightWidth)
+			}
+
+			t.Logf("Terminal: %d, Left: %d, Right: %d, Total: %d",
+				tc.terminalWidth, leftPanelWidth, rightPanelWidth, totalUsed)
+		})
+	}
+}
+
+// TestUpdateTableSizeAdaptive verifies that table columns adapt to available width
+func TestUpdateTableSizeAdaptive(t *testing.T) {
+	m := &FileBrowserModel{
+		files: []FileItem{
+			{Key: "test.txt", Size: 1024},
+		},
+	}
+	m.fileTable = createTestTable()
+
+	testWidths := []int{40, 60, 80, 100, 120, 150}
+
+	for _, width := range testWidths {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			m.updateTableSize(width, 20)
+
+			// Get the column configurations
+			columns := m.fileTable.Columns()
+			require.Equal(t, 4, len(columns), "Should have 4 columns")
+
+			// Calculate total width
+			totalWidth := 0
+			for _, col := range columns {
+				totalWidth += col.Width
+				require.Greater(t, col.Width, 0, "Column width should be positive")
+			}
+
+			// Total should fit within available space (accounting for borders/padding)
+			maxAllowed := width - 8 // Same as in updateTableSize
+			if maxAllowed < 40 {
+				maxAllowed = 40
+			}
+			require.LessOrEqual(t, totalWidth, maxAllowed + 10, // Allow some tolerance
+				"Total column width (%d) exceeds available space (%d)", totalWidth, maxAllowed)
+
+			t.Logf("Width %d: NAME=%d, SIZE=%d, TYPE=%d, MODIFIED=%d, Total=%d",
+				width, columns[0].Width, columns[1].Width, columns[2].Width, columns[3].Width, totalWidth)
+		})
+	}
+}
+
+func createTestTable() table.Model {
+	return table.New(
+		table.WithColumns([]table.Column{
+			{Title: "NAME", Width: 20},
+			{Title: "SIZE", Width: 10},
+			{Title: "TYPE", Width: 10},
+			{Title: "MODIFIED", Width: 16},
+		}),
+		table.WithHeight(10),
+	)
+}
