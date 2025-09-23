@@ -198,6 +198,7 @@ const (
 	InputModeNone InputMode = iota
 	InputModeSearch
 	InputModeUpload
+	InputModeUploadTarget
 )
 
 // InputComponentMode represents different input component types
@@ -271,6 +272,8 @@ type FileBrowserModel struct {
 	uploading      bool
 	uploadingFile  string
 	fileUploader   utils.FileUploader
+	uploadFilePath string // Temporary storage for selected file path
+	uploadTargetPath string // Target path for upload
 
 	// Delete state
 	deleting     bool
@@ -767,13 +770,11 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Check if a file was selected
 			if filePickerModel.Path != "" && filePickerModel.Path != m.filePicker.Path {
-				// File was selected, process it
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
+				// File was selected, move to target path input
 				selectedPath := filePickerModel.Path
 				m.filePicker = filePickerModel
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			m.filePicker = filePickerModel
@@ -1607,6 +1608,8 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		} else {
 			title = titleStyle.Render("📤 Upload File (Text Input)")
 		}
+	case InputModeUploadTarget:
+		title = titleStyle.Render("🎯 Set Target Path")
 	default:
 		title = titleStyle.Render("Input")
 	}
@@ -1639,6 +1642,8 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		} else {
 			instructions = instructionStyle.Render("[Enter] Confirm • [Tab] File Picker • [Esc] Cancel")
 		}
+	} else if m.inputMode == InputModeUploadTarget {
+		instructions = instructionStyle.Render("[Enter] Upload • [Esc] Cancel • End with '/' for folder, otherwise rename file")
 	} else {
 		instructions = instructionStyle.Render("[Enter] Confirm • [Esc] Cancel")
 	}
@@ -2115,20 +2120,16 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			if m.filePicker.Path != "" && m.filePicker.Path != oldPath {
 				selectedPath := m.filePicker.Path
 				logrus.Infof("File selected in picker: '%s'", selectedPath)
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			// Also check if this was a file selection by checking if we have a non-empty path
 			if m.filePicker.Path != "" {
 				selectedPath := m.filePicker.Path
 				logrus.Infof("File path available in picker: '%s'", selectedPath)
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			return m, cmd
@@ -2138,7 +2139,9 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			case InputModeSearch:
 				return m.processSearchInput()
 			case InputModeUpload:
-				return m.processUploadInput()
+				return m.processUploadFileSelection()
+			case InputModeUploadTarget:
+				return m.processUploadTargetInput()
 			}
 		}
 		m.showInput = false
@@ -2204,17 +2207,15 @@ func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 	return m, m.loadFiles()
 }
 
-// processUploadInput processes upload input
-func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
-	m.showInput = false
-	m.inputMode = InputModeNone
-
+// processUploadFileSelection processes file selection for upload
+func (m *FileBrowserModel) processUploadFileSelection() (tea.Model, tea.Cmd) {
 	filePath := strings.TrimSpace(m.textInput.Value())
 	m.textInput.SetValue("")
-	m.textInput.Blur()
 
 	if filePath == "" {
 		m.setMessage("No file path provided", messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	}
 
@@ -2240,22 +2241,139 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 	// Check if file exists (filepath.Clean handles spaces correctly)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	} else if err != nil {
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	}
 
+	// Store file path and move to target path input
+	m.uploadFilePath = filePath
+	return m.showTargetPathInput()
+}
+
+// showTargetPathInput shows the target path input dialog
+func (m *FileBrowserModel) showTargetPathInput() (tea.Model, tea.Cmd) {
+	m.inputMode = InputModeUploadTarget
+	m.inputComponentMode = InputComponentText
+	m.inputPrompt = fmt.Sprintf("Target path for '%s':", filepath.Base(m.uploadFilePath))
+
+	// Set default value to root directory (empty for root, or current prefix)
+	defaultPath := ""
+	if m.prefix != "" {
+		defaultPath = m.prefix + "/"
+	}
+
+	m.textInput.SetValue(defaultPath)
+	m.textInput.Placeholder = "Enter target path... (end with '/' for folder, otherwise rename)"
+	m.textInput.Focus()
+
+	return m, nil
+}
+
+// processUploadTargetInput processes target path input and starts upload
+func (m *FileBrowserModel) processUploadTargetInput() (tea.Model, tea.Cmd) {
+	m.showInput = false
+	m.inputMode = InputModeNone
+	m.inputComponentMode = InputComponentText
+
+	targetPath := strings.TrimSpace(m.textInput.Value())
+	m.textInput.SetValue("")
+	m.textInput.Blur()
+
+	// Process the target path using the same logic as cmd mode
+	// Import the function from cmd package or duplicate the logic
+	remotePath := m.processRemotePathTUI(targetPath, m.uploadFilePath, false)
+	m.uploadTargetPath = remotePath
+
+	logrus.Infof("Upload target processed: input='%s', final='%s'", targetPath, remotePath)
+
 	// Start upload process
 	m.uploading = true
-	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
+	m.uploadingFile = filepath.Base(m.uploadFilePath)
+	m.setMessage(fmt.Sprintf("Uploading %s to %s...", m.uploadingFile, remotePath), messaging.MessageWarning)
 
-	// Return command to start upload
-	return m, m.uploadFile(filePath)
+	// Return command to start upload with target path
+	return m, m.uploadFileWithTarget(m.uploadFilePath, remotePath)
+}
+
+// processRemotePathTUI processes the remote path for TUI uploads using same logic as cmd
+func (m *FileBrowserModel) processRemotePathTUI(remotePath, localPath string, isDir bool) string {
+	// If empty, use default behavior
+	if remotePath == "" {
+		if isDir {
+			return filepath.Base(localPath) + "/"
+		}
+		return filepath.Base(localPath)
+	}
+
+	// Clean the path
+	remotePath = strings.TrimSpace(remotePath)
+
+	// Handle directory uploads
+	if isDir {
+		// For directories, always ensure path ends with "/"
+		if !strings.HasSuffix(remotePath, "/") {
+			remotePath += "/"
+		}
+		return remotePath
+	}
+
+	// Handle single file uploads
+	if strings.HasSuffix(remotePath, "/") {
+		// Path ends with "/", treat as folder - append original filename
+		return remotePath + filepath.Base(localPath)
+	}
+
+	// Path doesn't end with "/", treat as renamed file
+	return remotePath
+}
+
+// uploadFileWithTarget uploads a file with a specific target path
+func (m *FileBrowserModel) uploadFileWithTarget(filePath, remotePath string) tea.Cmd {
+	return func() tea.Msg {
+		if m.fileUploader == nil {
+			return uploadCompletedMsg{
+				file: filepath.Base(filePath),
+				err:  errors.New("file uploader not initialized"),
+			}
+		}
+
+		// Create upload options from config
+		options := &utils.UploadOptions{
+			Overwrite:    m.config.Upload.DefaultOverwrite,
+			PublicAccess: m.config.Upload.DefaultPublic,
+			ContentType:  "", // Auto-detect
+		}
+
+		// Create progress callback
+		progressCallback := func(uploaded, total int64, percentage float64) {
+			if m.program != nil {
+				m.program.Send(uploadProgressMsg{
+					uploaded:   uploaded,
+					total:      total,
+					percentage: percentage,
+				})
+			}
+		}
+
+		// Perform upload with progress
+		ctx := context.Background()
+		err := m.fileUploader.UploadFileWithProgress(ctx, filePath, remotePath, options, progressCallback)
+
+		return uploadCompletedMsg{
+			file: filepath.Base(filePath),
+			err:  err,
+		}
+	}
 }
 
 // processUploadWithPath processes upload with file picker selected path
+// This function is kept for backward compatibility but redirects to new two-step process
 func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, tea.Cmd) {
 	if filePath == "" {
 		m.setMessage("No file selected", messaging.MessageError)
@@ -2280,13 +2398,9 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 		return m, nil
 	}
 
-	// Start upload process
-	m.uploading = true
-	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
-
-	// Return command to start upload
-	return m, m.uploadFile(filePath)
+	// Store file path and redirect to target path input
+	m.uploadFilePath = filePath
+	return m.showTargetPathInput()
 }
 
 // clearSearch clears search mode and reloads files without search
@@ -2452,6 +2566,10 @@ func (m *FileBrowserModel) resetUploadState() {
 
 	// Clear file picker selected path
 	m.filePicker.Path = ""
+
+	// Clear upload file paths
+	m.uploadFilePath = ""
+	m.uploadTargetPath = ""
 
 	// Reset input states
 	m.showInput = false
