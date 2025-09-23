@@ -198,6 +198,7 @@ const (
 	InputModeNone InputMode = iota
 	InputModeSearch
 	InputModeUpload
+	InputModeUploadTarget
 )
 
 // InputComponentMode represents different input component types
@@ -271,6 +272,8 @@ type FileBrowserModel struct {
 	uploading      bool
 	uploadingFile  string
 	fileUploader   utils.FileUploader
+	uploadFilePath string // Temporary storage for selected file path
+	uploadTargetPath string // Target path for upload
 
 	// Delete state
 	deleting     bool
@@ -767,13 +770,11 @@ func (m *FileBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Check if a file was selected
 			if filePickerModel.Path != "" && filePickerModel.Path != m.filePicker.Path {
-				// File was selected, process it
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
+				// File was selected, move to target path input
 				selectedPath := filePickerModel.Path
 				m.filePicker = filePickerModel
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			m.filePicker = filePickerModel
@@ -1455,25 +1456,14 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			content.WriteString(hintStyle.Render(source))
 			content.WriteString("\n")
 
-			// 添加装饰性分隔线
-			separatorStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorBrightBlue)).
-				Bold(true)
-			separator := separatorStyle.Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-			content.WriteString(separator)
-			content.WriteString("\n\n")
-
 			// 预览是 ANSI 文本，直接放入内容中
+			content.WriteString("\n")
 			content.WriteString(m.imagePreview.RenderedData)
 			content.WriteString("\x1b[0m")
-
-			// 底部装饰线
-			content.WriteString("\n")
-			content.WriteString(separator)
 		}
 	}
 
-	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(content.String())
+	return theme.CreateRightPanelStyle(panelWidth, panelHeight).Render(content.String())
 }
 
 // renderFloatingDialog renders a dialog floating over the base view while keeping base visible
@@ -1607,6 +1597,8 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		} else {
 			title = titleStyle.Render("📤 Upload File (Text Input)")
 		}
+	case InputModeUploadTarget:
+		title = titleStyle.Render("🎯 Set Target Path")
 	default:
 		title = titleStyle.Render("Input")
 	}
@@ -1639,6 +1631,8 @@ func (m *FileBrowserModel) renderInputPopup() string {
 		} else {
 			instructions = instructionStyle.Render("[Enter] Confirm • [Tab] File Picker • [Esc] Cancel")
 		}
+	} else if m.inputMode == InputModeUploadTarget {
+		instructions = instructionStyle.Render("[Enter] Upload • [Esc] Cancel • End with '/' for folder, otherwise rename file")
 	} else {
 		instructions = instructionStyle.Render("[Enter] Confirm • [Esc] Cancel")
 	}
@@ -1903,6 +1897,36 @@ func (m *FileBrowserModel) getFormattedCategory(category string) string {
 	}
 }
 
+// getFormattedCategoryShort returns very short category names for compact layouts
+func (m *FileBrowserModel) getFormattedCategoryShort(category string) string {
+	switch category {
+	case "image":
+		return "IMG"
+	case "document":
+		return "DOC"
+	case "spreadsheet":
+		return "XLS"
+	case "presentation":
+		return "PPT"
+	case "archive":
+		return "ARC"
+	case "video":
+		return "VID"
+	case "audio":
+		return "AUD"
+	case "text":
+		return "TXT"
+	case "code":
+		return "CODE"
+	case "data":
+		return "DATA"
+	case "font":
+		return "FONT"
+	default:
+		return "OTH"
+	}
+}
+
 // makeClickableURL creates a clickable URL using OSC 8 escape sequences
 // This is supported by modern terminals like iTerm2, Windows Terminal, Ghostty, etc.
 func (m *FileBrowserModel) makeClickableURL(displayText, url string) string {
@@ -1932,6 +1956,25 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// formatFileSizeCompact formats file size in a more compact format
+func formatFileSizeCompact(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	// Use shorter format without space and decimal for very small sizes
+	size := float64(bytes) / float64(div)
+	if size < 10 {
+		return fmt.Sprintf("%.1f%c", size, "KMGTPE"[exp])
+	}
+	return fmt.Sprintf("%.0f%c", size, "KMGTPE"[exp])
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -1952,56 +1995,135 @@ func (m *FileBrowserModel) updateRightPanel() {
 	m.previewURL = ""
 }
 
-// updateTable updates table data from files slice
+// updateTable updates table data from files slice with responsive content
 func (m *FileBrowserModel) updateTable() {
+	// Always use 4 columns now - fixed layout
+	columns := m.fileTable.Columns()
+
+	// Safety check
+	if len(columns) != 4 || len(m.files) == 0 {
+		m.fileTable.SetRows([]table.Row{})
+		return
+	}
+
 	rows := make([]table.Row, len(m.files))
 	for i, file := range m.files {
-		name := file.Key
-		if len(name) > tuiconfig.FileNameTruncateLength { // Leave space for "..."
-			name = name[:tuiconfig.FileNameTruncateLength] + "..."
+		// Dynamic filename truncation based on available width
+		nameColWidth := columns[0].Width
+		maxNameLength := nameColWidth - 3 // Leave space for "..."
+
+		// Ensure minimum readable filename length
+		if maxNameLength < 3 {
+			maxNameLength = 3
 		}
 
-		// Apply color to filename only (remove emoji to fix encoding issues)
+		name := file.Key
+		if len(name) > maxNameLength {
+			if maxNameLength <= 3 {
+				// For very small widths, just show first few characters
+				name = name[:maxNameLength]
+			} else {
+				name = name[:maxNameLength] + "..."
+			}
+		}
+
+		// Apply color to filename
 		color := theme.GetFileColor(file.Category)
 		coloredName := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(color)).
 			Render(name)
 
-		size := formatFileSize(file.Size)
-		// Better formatted category names
-		category := m.getFormattedCategory(file.Category)
-		if len(category) > tuiconfig.CategoryTruncateLength {
-			category = category[:tuiconfig.CategoryTruncateLength]
+		// Fixed 4-column row structure
+		row := make(table.Row, 4)
+
+		// Column 0: NAME
+		row[0] = coloredName
+
+		// Column 1: SIZE
+		if columns[1].Width >= 10 {
+			row[1] = formatFileSize(file.Size)
+		} else {
+			row[1] = formatFileSizeCompact(file.Size)
 		}
 
-		modified := file.LastModified.Format("01-02 15:04")
+		// Column 2: TYPE
+		if columns[2].Width >= 8 {
+			fullCategory := m.getFormattedCategory(file.Category)
+			if len(fullCategory) <= columns[2].Width {
+				row[2] = fullCategory
+			} else {
+				row[2] = m.getFormattedCategoryShort(file.Category)
+			}
+		} else {
+			row[2] = m.getFormattedCategoryShort(file.Category)
+		}
 
-		rows[i] = table.Row{coloredName, size, category, modified}
+		// Column 3: MODIFIED
+		if columns[3].Width >= 12 {
+			row[3] = file.LastModified.Format("01-02 15:04")
+		} else {
+			row[3] = file.LastModified.Format("01-02")
+		}
+
+		rows[i] = row
 	}
 	m.fileTable.SetRows(rows)
 }
 
-// updateTableSize updates table dimensions and column widths
+// updateTableSize updates table dimensions and column widths with responsive design
 func (m *FileBrowserModel) updateTableSize(width, height int) {
-	// Calculate optimal column widths based on available width
-	totalWidth := width - 8 // Reserve space for borders and padding
+	// Calculate available width for table content
+	// Account for: table borders (2) + column separators + padding
+	// Be more conservative to prevent overflow
+	availableWidth := width - 10
 
-	// Fixed column widths with priority to essential information
-	sizeWidth := tuiconfig.DefaultColumnSizeWidth
-	typeWidth := tuiconfig.DefaultColumnTypeWidth
-	modifiedWidth := tuiconfig.DefaultColumnModifiedWidth
-
-	// NAME column gets remaining width
-	nameWidth := totalWidth - sizeWidth - typeWidth - modifiedWidth
-	const minNameWidth = 25 // Minimum for reasonable filename
-	const maxNameWidth = 60 // Maximum to prevent overly long names
-	if nameWidth < minNameWidth {
-		nameWidth = minNameWidth
-	} else if nameWidth > maxNameWidth {
-		nameWidth = maxNameWidth
+	// Ensure minimum workable width
+	if availableWidth < 30 {
+		availableWidth = 30
 	}
 
-	// Update table columns
+	// Always use 4 columns - fixed layout
+	// Calculate table overhead: left_border + col1 + sep + col2 + sep + col3 + sep + col4 + right_border = overhead of 7
+	overhead := 7
+	contentWidth := availableWidth - overhead
+
+	// Fixed column widths with proportional scaling
+	var sizeWidth, typeWidth, modifiedWidth, nameWidth int
+
+	if contentWidth >= 60 {
+		// Normal mode - comfortable widths
+		sizeWidth = 10
+		typeWidth = 10
+		modifiedWidth = 16
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	} else if contentWidth >= 40 {
+		// Compact mode - reduced widths
+		sizeWidth = 8
+		typeWidth = 6
+		modifiedWidth = 12
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	} else {
+		// Ultra compact mode - minimal widths
+		sizeWidth = 6
+		typeWidth = 4
+		modifiedWidth = 8
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	}
+
+	// Ensure minimum widths
+	if nameWidth < 8 {
+		nameWidth = 8
+	}
+	if sizeWidth < 4 {
+		sizeWidth = 4
+	}
+	if typeWidth < 3 {
+		typeWidth = 3
+	}
+	if modifiedWidth < 6 {
+		modifiedWidth = 6
+	}
+
 	columns := []table.Column{
 		{Title: "NAME", Width: nameWidth},
 		{Title: "SIZE", Width: sizeWidth},
@@ -2009,8 +2131,15 @@ func (m *FileBrowserModel) updateTableSize(width, height int) {
 		{Title: "MODIFIED", Width: modifiedWidth},
 	}
 
+	// Set columns and height
 	m.fileTable.SetColumns(columns)
 	m.fileTable.SetHeight(height)
+
+	// Force clear all existing rows to prevent column/row count mismatch
+	m.fileTable.SetRows([]table.Row{})
+
+	// Immediately rebuild rows with new column structure
+	m.updateTable()
 }
 
 // generatePreviewURL generates preview URL for a file
@@ -2115,20 +2244,16 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			if m.filePicker.Path != "" && m.filePicker.Path != oldPath {
 				selectedPath := m.filePicker.Path
 				logrus.Infof("File selected in picker: '%s'", selectedPath)
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			// Also check if this was a file selection by checking if we have a non-empty path
 			if m.filePicker.Path != "" {
 				selectedPath := m.filePicker.Path
 				logrus.Infof("File path available in picker: '%s'", selectedPath)
-				m.showInput = false
-				m.inputMode = InputModeNone
-				m.inputComponentMode = InputComponentText
-				return m.processUploadWithPath(selectedPath)
+				m.uploadFilePath = selectedPath
+				return m.showTargetPathInput()
 			}
 
 			return m, cmd
@@ -2138,7 +2263,9 @@ func (m *FileBrowserModel) handleInputPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			case InputModeSearch:
 				return m.processSearchInput()
 			case InputModeUpload:
-				return m.processUploadInput()
+				return m.processUploadFileSelection()
+			case InputModeUploadTarget:
+				return m.processUploadTargetInput()
 			}
 		}
 		m.showInput = false
@@ -2204,17 +2331,15 @@ func (m *FileBrowserModel) processSearchInput() (tea.Model, tea.Cmd) {
 	return m, m.loadFiles()
 }
 
-// processUploadInput processes upload input
-func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
-	m.showInput = false
-	m.inputMode = InputModeNone
-
+// processUploadFileSelection processes file selection for upload
+func (m *FileBrowserModel) processUploadFileSelection() (tea.Model, tea.Cmd) {
 	filePath := strings.TrimSpace(m.textInput.Value())
 	m.textInput.SetValue("")
-	m.textInput.Blur()
 
 	if filePath == "" {
 		m.setMessage("No file path provided", messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	}
 
@@ -2240,22 +2365,139 @@ func (m *FileBrowserModel) processUploadInput() (tea.Model, tea.Cmd) {
 	// Check if file exists (filepath.Clean handles spaces correctly)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		m.setMessage(fmt.Sprintf("File not found: '%s'", filePath), messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	} else if err != nil {
 		m.setMessage(fmt.Sprintf("Error accessing file: %v", err), messaging.MessageError)
+		m.showInput = false
+		m.inputMode = InputModeNone
 		return m, nil
 	}
 
+	// Store file path and move to target path input
+	m.uploadFilePath = filePath
+	return m.showTargetPathInput()
+}
+
+// showTargetPathInput shows the target path input dialog
+func (m *FileBrowserModel) showTargetPathInput() (tea.Model, tea.Cmd) {
+	m.inputMode = InputModeUploadTarget
+	m.inputComponentMode = InputComponentText
+	m.inputPrompt = fmt.Sprintf("Target path for '%s':", filepath.Base(m.uploadFilePath))
+
+	// Set default value to root directory (empty for root, or current prefix)
+	defaultPath := ""
+	if m.prefix != "" {
+		defaultPath = m.prefix + "/"
+	}
+
+	m.textInput.SetValue(defaultPath)
+	m.textInput.Placeholder = "Enter target path... (end with '/' for folder, otherwise rename)"
+	m.textInput.Focus()
+
+	return m, nil
+}
+
+// processUploadTargetInput processes target path input and starts upload
+func (m *FileBrowserModel) processUploadTargetInput() (tea.Model, tea.Cmd) {
+	m.showInput = false
+	m.inputMode = InputModeNone
+	m.inputComponentMode = InputComponentText
+
+	targetPath := strings.TrimSpace(m.textInput.Value())
+	m.textInput.SetValue("")
+	m.textInput.Blur()
+
+	// Process the target path using the same logic as cmd mode
+	// Import the function from cmd package or duplicate the logic
+	remotePath := m.processRemotePathTUI(targetPath, m.uploadFilePath, false)
+	m.uploadTargetPath = remotePath
+
+	logrus.Infof("Upload target processed: input='%s', final='%s'", targetPath, remotePath)
+
 	// Start upload process
 	m.uploading = true
-	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
+	m.uploadingFile = filepath.Base(m.uploadFilePath)
+	m.setMessage(fmt.Sprintf("Uploading %s to %s...", m.uploadingFile, remotePath), messaging.MessageWarning)
 
-	// Return command to start upload
-	return m, m.uploadFile(filePath)
+	// Return command to start upload with target path
+	return m, m.uploadFileWithTarget(m.uploadFilePath, remotePath)
+}
+
+// processRemotePathTUI processes the remote path for TUI uploads using same logic as cmd
+func (m *FileBrowserModel) processRemotePathTUI(remotePath, localPath string, isDir bool) string {
+	// If empty, use default behavior
+	if remotePath == "" {
+		if isDir {
+			return filepath.Base(localPath) + "/"
+		}
+		return filepath.Base(localPath)
+	}
+
+	// Clean the path
+	remotePath = strings.TrimSpace(remotePath)
+
+	// Handle directory uploads
+	if isDir {
+		// For directories, always ensure path ends with "/"
+		if !strings.HasSuffix(remotePath, "/") {
+			remotePath += "/"
+		}
+		return remotePath
+	}
+
+	// Handle single file uploads
+	if strings.HasSuffix(remotePath, "/") {
+		// Path ends with "/", treat as folder - append original filename
+		return remotePath + filepath.Base(localPath)
+	}
+
+	// Path doesn't end with "/", treat as renamed file
+	return remotePath
+}
+
+// uploadFileWithTarget uploads a file with a specific target path
+func (m *FileBrowserModel) uploadFileWithTarget(filePath, remotePath string) tea.Cmd {
+	return func() tea.Msg {
+		if m.fileUploader == nil {
+			return uploadCompletedMsg{
+				file: filepath.Base(filePath),
+				err:  errors.New("file uploader not initialized"),
+			}
+		}
+
+		// Create upload options from config
+		options := &utils.UploadOptions{
+			Overwrite:    m.config.Upload.DefaultOverwrite,
+			PublicAccess: m.config.Upload.DefaultPublic,
+			ContentType:  "", // Auto-detect
+		}
+
+		// Create progress callback
+		progressCallback := func(uploaded, total int64, percentage float64) {
+			if m.program != nil {
+				m.program.Send(uploadProgressMsg{
+					uploaded:   uploaded,
+					total:      total,
+					percentage: percentage,
+				})
+			}
+		}
+
+		// Perform upload with progress
+		ctx := context.Background()
+		err := m.fileUploader.UploadFileWithProgress(ctx, filePath, remotePath, options, progressCallback)
+
+		return uploadCompletedMsg{
+			file: filepath.Base(filePath),
+			err:  err,
+		}
+	}
 }
 
 // processUploadWithPath processes upload with file picker selected path
+// This function is kept for backward compatibility but redirects to new two-step process
 func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, tea.Cmd) {
 	if filePath == "" {
 		m.setMessage("No file selected", messaging.MessageError)
@@ -2280,13 +2522,9 @@ func (m *FileBrowserModel) processUploadWithPath(filePath string) (tea.Model, te
 		return m, nil
 	}
 
-	// Start upload process
-	m.uploading = true
-	m.uploadingFile = filepath.Base(filePath)
-	m.setMessage(fmt.Sprintf("Uploading %s...", m.uploadingFile), messaging.MessageWarning)
-
-	// Return command to start upload
-	return m, m.uploadFile(filePath)
+	// Store file path and redirect to target path input
+	m.uploadFilePath = filePath
+	return m.showTargetPathInput()
 }
 
 // clearSearch clears search mode and reloads files without search
@@ -2452,6 +2690,10 @@ func (m *FileBrowserModel) resetUploadState() {
 
 	// Clear file picker selected path
 	m.filePicker.Path = ""
+
+	// Clear upload file paths
+	m.uploadFilePath = ""
+	m.uploadTargetPath = ""
 
 	// Reset input states
 	m.showInput = false

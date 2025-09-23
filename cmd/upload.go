@@ -39,11 +39,18 @@ var uploadCmd = &cobra.Command{
 	Short: "Upload a file or folder to R2 storage",
 	Long: `Upload a file or folder to the specified R2 bucket.
 
+Target Path Logic:
+  - If remote-path ends with "/", it's treated as a folder
+  - If remote-path doesn't end with "/", it's treated as a renamed file
+  - Empty remote-path defaults to root directory with original name
+
 Examples:
-  r2s3-cli upload image.jpg                    # Upload file to root with same name
-  r2s3-cli upload image.jpg photos/image.jpg  # Upload file to specific path
-  r2s3-cli upload ./photos                    # Upload entire folder recursively
-  r2s3-cli upload ./photos images/            # Upload folder to specific path
+  r2s3-cli upload image.jpg                    # Upload to root: image.jpg
+  r2s3-cli upload image.jpg newname.jpg       # Upload as: newname.jpg
+  r2s3-cli upload image.jpg photos/           # Upload to folder: photos/image.jpg
+  r2s3-cli upload image.jpg photos/new.jpg    # Upload as: photos/new.jpg
+  r2s3-cli upload ./photos                    # Upload folder as: photos/
+  r2s3-cli upload ./photos images/            # Upload folder to: images/
   r2s3-cli upload image.jpg --compress high   # Upload with high compression
   r2s3-cli upload image.jpg --no-progress     # Upload without progress bar`,
 	Args: cobra.MinimumNArgs(1),
@@ -58,6 +65,41 @@ func init() {
 	uploadCmd.Flags().BoolVar(&uploadOverwrite, "overwrite", false, "overwrite existing files")
 	uploadCmd.Flags().StringVarP(&uploadCompress, "compress", "z", "", "image compression level (high, fine, normal, low)")
 	uploadCmd.Flags().BoolVar(&uploadNoProgress, "no-progress", false, "disable progress bar")
+}
+
+// processRemotePath processes the remote path based on upload logic:
+// - If path ends with "/", it's treated as a folder, file uploaded with original name
+// - If path doesn't end with "/", it's treated as a renamed file
+// - Empty path defaults to root directory
+func processRemotePath(remotePath, localPath string, isDir bool) string {
+	// If empty, use default behavior
+	if remotePath == "" {
+		if isDir {
+			return filepath.Base(localPath) + "/"
+		}
+		return filepath.Base(localPath)
+	}
+
+	// Clean the path
+	remotePath = strings.TrimSpace(remotePath)
+
+	// Handle directory uploads
+	if isDir {
+		// For directories, always ensure path ends with "/"
+		if !strings.HasSuffix(remotePath, "/") {
+			remotePath += "/"
+		}
+		return remotePath
+	}
+
+	// Handle single file uploads
+	if strings.HasSuffix(remotePath, "/") {
+		// Path ends with "/", treat as folder - append original filename
+		return remotePath + filepath.Base(localPath)
+	}
+
+	// Path doesn't end with "/", treat as renamed file
+	return remotePath
 }
 
 func uploadFile(cmd *cobra.Command, args []string) error {
@@ -83,7 +125,7 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to access %s: %w", localPath, err)
 	}
 
-	// Determine remote path
+	// Determine remote path with enhanced logic
 	var remotePath string
 	if len(args) > 1 {
 		remotePath = args[1]
@@ -94,6 +136,9 @@ func uploadFile(cmd *cobra.Command, args []string) error {
 			remotePath = filepath.Base(localPath)
 		}
 	}
+
+	// Process remote path with enhanced logic
+	remotePath = processRemotePath(remotePath, localPath, fileInfo.IsDir())
 
 	if fileInfo.IsDir() {
 		return uploadDirectory(client, bucketName, localPath, remotePath, cfg, cmd)

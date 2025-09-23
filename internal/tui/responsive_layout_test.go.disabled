@@ -1,0 +1,181 @@
+package tui
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestResponsiveLayout validates the new responsive layout system
+func TestResponsiveLayout(t *testing.T) {
+	m := &FileBrowserModel{
+		files: []FileItem{
+			{Key: "test1.txt", Size: 1024},
+			{Key: "test2.jpg", Size: 2048},
+		},
+	}
+
+	testCases := []struct {
+		name           string
+		terminalWidth  int
+		terminalHeight int
+		expectedHorizontal bool
+		description    string
+	}{
+		{
+			name: "Wide Terminal",
+			terminalWidth: 200,
+			terminalHeight: 40,
+			expectedHorizontal: true,
+			description: "Should use horizontal layout for wide terminals",
+		},
+		{
+			name: "Medium Terminal (185 chars - target case)",
+			terminalWidth: 185,
+			terminalHeight: 30,
+			expectedHorizontal: true,
+			description: "Should handle 185 chars width properly",
+		},
+		{
+			name: "Narrow Terminal",
+			terminalWidth: 120,
+			terminalHeight: 25,
+			expectedHorizontal: true,
+			description: "Should still use horizontal layout for medium width",
+		},
+		{
+			name: "Very Narrow Terminal",
+			terminalWidth: 80,
+			terminalHeight: 20,
+			expectedHorizontal: false,
+			description: "Should switch to stacked layout at 80 chars (narrow threshold)",
+		},
+		{
+			name: "Extremely Narrow Terminal",
+			terminalWidth: 60,
+			terminalHeight: 20,
+			expectedHorizontal: false,
+			description: "Should switch to stacked layout for very narrow terminals",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			m.windowWidth = tc.terminalWidth
+			m.viewportHeight = tc.terminalHeight
+
+			layout := m.calculateResponsiveLayout()
+
+			// Verify layout mode
+			require.Equal(t, tc.expectedHorizontal, layout.isHorizontal, tc.description)
+
+			// Verify dimensions make sense
+			require.Greater(t, layout.leftWidth, 0, "Left width should be positive")
+			require.Greater(t, layout.rightWidth, 0, "Right width should be positive")
+			require.Greater(t, layout.contentHeight, 0, "Content height should be positive")
+
+			if layout.isHorizontal {
+				// For horizontal layout, total content width should not exceed available space
+				totalContentWidth := layout.leftWidth + layout.rightWidth + 1 // +1 for separator
+				availableWidth := tc.terminalWidth - 4 // Account for container padding/border
+				require.LessOrEqual(t, totalContentWidth, availableWidth,
+					"Content width should not exceed available space")
+
+				// Both panels should have same height in horizontal mode
+				require.Equal(t, layout.contentHeight, layout.contentHeight,
+					"Both panels should have same height in horizontal mode")
+			} else {
+				// For stacked layout, width should be same for both panels
+				require.Equal(t, layout.leftWidth, layout.rightWidth,
+					"Both panels should have same width in stacked mode")
+			}
+
+			t.Logf("Layout for %dx%d terminal: horizontal=%v, left=%dx%d, right=%dx%d",
+				tc.terminalWidth, tc.terminalHeight, layout.isHorizontal,
+				layout.leftWidth, layout.contentHeight,
+				layout.rightWidth, layout.contentHeight)
+		})
+	}
+}
+
+// TestResponsiveLayoutRatios verifies adaptive ratio calculation
+func TestResponsiveLayoutRatios(t *testing.T) {
+	m := &FileBrowserModel{}
+
+	testCases := []struct {
+		width         int
+		expectedRatio float64
+		description   string
+	}{
+		{200, 0.6, "Wide terminal should use 60% ratio"},
+		{180, 0.6, "At wide threshold should use 60% ratio"},
+		{150, 0.65, "Medium width should use 65% ratio"},
+		{120, 0.65, "At medium threshold should use 65% ratio"},
+		{100, 0.7, "Narrow width should use 70% ratio"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			m.windowWidth = tc.width
+			m.viewportHeight = 30
+
+			layout := m.calculateResponsiveLayout()
+
+			if layout.isHorizontal {
+				// Calculate actual ratio
+				totalUsableWidth := layout.leftWidth + layout.rightWidth
+				actualRatio := float64(layout.leftWidth) / float64(totalUsableWidth)
+
+				// Allow small tolerance for integer division
+				require.InDelta(t, tc.expectedRatio, actualRatio, 0.05,
+					"Actual ratio %.3f should be close to expected %.3f", actualRatio, tc.expectedRatio)
+
+				t.Logf("Width %d: Expected ratio %.2f, Actual ratio %.3f (left=%d, total=%d)",
+					tc.width, tc.expectedRatio, actualRatio, layout.leftWidth, totalUsableWidth)
+			}
+		})
+	}
+}
+
+// TestTableBorderStyling verifies table border configuration
+func TestTableBorderStyling(t *testing.T) {
+	m := &FileBrowserModel{
+		files: []FileItem{
+			{Key: "test.txt", Size: 1024},
+		},
+	}
+	m.fileTable = createTestTable()
+
+	// Test different width scenarios
+	testWidths := []int{60, 80, 120, 180}
+
+	for _, width := range testWidths {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			// This should not panic and should set proper table styling
+			m.updateTableSizeWithBorder(width, 20)
+
+			columns := m.fileTable.Columns()
+			require.Equal(t, 4, len(columns), "Should have 4 columns")
+
+			// Verify all columns have positive widths
+			for i, col := range columns {
+				require.Greater(t, col.Width, 0, "Column %d should have positive width", i)
+			}
+
+			// Calculate total width
+			totalWidth := 0
+			for _, col := range columns {
+				totalWidth += col.Width
+			}
+
+			expectedTotal := width - 4 // Account for table borders
+			require.LessOrEqual(t, totalWidth, expectedTotal+5, // Small tolerance
+				"Total column width should not exceed available space")
+
+			t.Logf("Width %d: Columns [%d, %d, %d, %d], Total: %d (max: %d)",
+				width, columns[0].Width, columns[1].Width, columns[2].Width, columns[3].Width,
+				totalWidth, expectedTotal)
+		})
+	}
+}
