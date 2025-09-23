@@ -1456,21 +1456,10 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 			content.WriteString(hintStyle.Render(source))
 			content.WriteString("\n")
 
-			// 添加装饰性分隔线
-			separatorStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(theme.ColorBrightBlue)).
-				Bold(true)
-			separator := separatorStyle.Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-			content.WriteString(separator)
-			content.WriteString("\n\n")
-
 			// 预览是 ANSI 文本，直接放入内容中
+			content.WriteString("\n")
 			content.WriteString(m.imagePreview.RenderedData)
 			content.WriteString("\x1b[0m")
-
-			// 底部装饰线
-			content.WriteString("\n")
-			content.WriteString(separator)
 		}
 	}
 
@@ -1908,6 +1897,36 @@ func (m *FileBrowserModel) getFormattedCategory(category string) string {
 	}
 }
 
+// getFormattedCategoryShort returns very short category names for compact layouts
+func (m *FileBrowserModel) getFormattedCategoryShort(category string) string {
+	switch category {
+	case "image":
+		return "IMG"
+	case "document":
+		return "DOC"
+	case "spreadsheet":
+		return "XLS"
+	case "presentation":
+		return "PPT"
+	case "archive":
+		return "ARC"
+	case "video":
+		return "VID"
+	case "audio":
+		return "AUD"
+	case "text":
+		return "TXT"
+	case "code":
+		return "CODE"
+	case "data":
+		return "DATA"
+	case "font":
+		return "FONT"
+	default:
+		return "OTH"
+	}
+}
+
 // makeClickableURL creates a clickable URL using OSC 8 escape sequences
 // This is supported by modern terminals like iTerm2, Windows Terminal, Ghostty, etc.
 func (m *FileBrowserModel) makeClickableURL(displayText, url string) string {
@@ -1937,6 +1956,25 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// formatFileSizeCompact formats file size in a more compact format
+func formatFileSizeCompact(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	// Use shorter format without space and decimal for very small sizes
+	size := float64(bytes) / float64(div)
+	if size < 10 {
+		return fmt.Sprintf("%.1f%c", size, "KMGTPE"[exp])
+	}
+	return fmt.Sprintf("%.0f%c", size, "KMGTPE"[exp])
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -1957,56 +1995,135 @@ func (m *FileBrowserModel) updateRightPanel() {
 	m.previewURL = ""
 }
 
-// updateTable updates table data from files slice
+// updateTable updates table data from files slice with responsive content
 func (m *FileBrowserModel) updateTable() {
+	// Always use 4 columns now - fixed layout
+	columns := m.fileTable.Columns()
+
+	// Safety check
+	if len(columns) != 4 || len(m.files) == 0 {
+		m.fileTable.SetRows([]table.Row{})
+		return
+	}
+
 	rows := make([]table.Row, len(m.files))
 	for i, file := range m.files {
-		name := file.Key
-		if len(name) > tuiconfig.FileNameTruncateLength { // Leave space for "..."
-			name = name[:tuiconfig.FileNameTruncateLength] + "..."
+		// Dynamic filename truncation based on available width
+		nameColWidth := columns[0].Width
+		maxNameLength := nameColWidth - 3 // Leave space for "..."
+
+		// Ensure minimum readable filename length
+		if maxNameLength < 3 {
+			maxNameLength = 3
 		}
 
-		// Apply color to filename only (remove emoji to fix encoding issues)
+		name := file.Key
+		if len(name) > maxNameLength {
+			if maxNameLength <= 3 {
+				// For very small widths, just show first few characters
+				name = name[:maxNameLength]
+			} else {
+				name = name[:maxNameLength] + "..."
+			}
+		}
+
+		// Apply color to filename
 		color := theme.GetFileColor(file.Category)
 		coloredName := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(color)).
 			Render(name)
 
-		size := formatFileSize(file.Size)
-		// Better formatted category names
-		category := m.getFormattedCategory(file.Category)
-		if len(category) > tuiconfig.CategoryTruncateLength {
-			category = category[:tuiconfig.CategoryTruncateLength]
+		// Fixed 4-column row structure
+		row := make(table.Row, 4)
+
+		// Column 0: NAME
+		row[0] = coloredName
+
+		// Column 1: SIZE
+		if columns[1].Width >= 10 {
+			row[1] = formatFileSize(file.Size)
+		} else {
+			row[1] = formatFileSizeCompact(file.Size)
 		}
 
-		modified := file.LastModified.Format("01-02 15:04")
+		// Column 2: TYPE
+		if columns[2].Width >= 8 {
+			fullCategory := m.getFormattedCategory(file.Category)
+			if len(fullCategory) <= columns[2].Width {
+				row[2] = fullCategory
+			} else {
+				row[2] = m.getFormattedCategoryShort(file.Category)
+			}
+		} else {
+			row[2] = m.getFormattedCategoryShort(file.Category)
+		}
 
-		rows[i] = table.Row{coloredName, size, category, modified}
+		// Column 3: MODIFIED
+		if columns[3].Width >= 12 {
+			row[3] = file.LastModified.Format("01-02 15:04")
+		} else {
+			row[3] = file.LastModified.Format("01-02")
+		}
+
+		rows[i] = row
 	}
 	m.fileTable.SetRows(rows)
 }
 
-// updateTableSize updates table dimensions and column widths
+// updateTableSize updates table dimensions and column widths with responsive design
 func (m *FileBrowserModel) updateTableSize(width, height int) {
-	// Calculate optimal column widths based on available width
-	totalWidth := width - 8 // Reserve space for borders and padding
+	// Calculate available width for table content
+	// Account for: table borders (2) + column separators + padding
+	// Be more conservative to prevent overflow
+	availableWidth := width - 10
 
-	// Fixed column widths with priority to essential information
-	sizeWidth := tuiconfig.DefaultColumnSizeWidth
-	typeWidth := tuiconfig.DefaultColumnTypeWidth
-	modifiedWidth := tuiconfig.DefaultColumnModifiedWidth
-
-	// NAME column gets remaining width
-	nameWidth := totalWidth - sizeWidth - typeWidth - modifiedWidth
-	const minNameWidth = 25 // Minimum for reasonable filename
-	const maxNameWidth = 60 // Maximum to prevent overly long names
-	if nameWidth < minNameWidth {
-		nameWidth = minNameWidth
-	} else if nameWidth > maxNameWidth {
-		nameWidth = maxNameWidth
+	// Ensure minimum workable width
+	if availableWidth < 30 {
+		availableWidth = 30
 	}
 
-	// Update table columns
+	// Always use 4 columns - fixed layout
+	// Calculate table overhead: left_border + col1 + sep + col2 + sep + col3 + sep + col4 + right_border = overhead of 7
+	overhead := 7
+	contentWidth := availableWidth - overhead
+
+	// Fixed column widths with proportional scaling
+	var sizeWidth, typeWidth, modifiedWidth, nameWidth int
+
+	if contentWidth >= 60 {
+		// Normal mode - comfortable widths
+		sizeWidth = 10
+		typeWidth = 10
+		modifiedWidth = 16
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	} else if contentWidth >= 40 {
+		// Compact mode - reduced widths
+		sizeWidth = 8
+		typeWidth = 6
+		modifiedWidth = 12
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	} else {
+		// Ultra compact mode - minimal widths
+		sizeWidth = 6
+		typeWidth = 4
+		modifiedWidth = 8
+		nameWidth = contentWidth - sizeWidth - typeWidth - modifiedWidth
+	}
+
+	// Ensure minimum widths
+	if nameWidth < 8 {
+		nameWidth = 8
+	}
+	if sizeWidth < 4 {
+		sizeWidth = 4
+	}
+	if typeWidth < 3 {
+		typeWidth = 3
+	}
+	if modifiedWidth < 6 {
+		modifiedWidth = 6
+	}
+
 	columns := []table.Column{
 		{Title: "NAME", Width: nameWidth},
 		{Title: "SIZE", Width: sizeWidth},
@@ -2014,8 +2131,15 @@ func (m *FileBrowserModel) updateTableSize(width, height int) {
 		{Title: "MODIFIED", Width: modifiedWidth},
 	}
 
+	// Set columns and height
 	m.fileTable.SetColumns(columns)
 	m.fileTable.SetHeight(height)
+
+	// Force clear all existing rows to prevent column/row count mismatch
+	m.fileTable.SetRows([]table.Row{})
+
+	// Immediately rebuild rows with new column structure
+	m.updateTable()
 }
 
 // generatePreviewURL generates preview URL for a file
