@@ -29,12 +29,14 @@ go install github.com/HaiFongPan/r2s3-cli@latest
 ## Quick Start
 
 1. **Create config file:**
+
 ```bash
 mkdir -p ~/.r2s3-cli
 cp examples/config.toml ~/.r2s3-cli/config.toml
 ```
 
 2. **Edit the config with your R2 credentials:**
+
 ```toml
 [r2]
 account_id = "your-cloudflare-account-id"
@@ -48,7 +50,8 @@ bucket_name = "your-bucket-name"
 ```bash
 r2s3-cli
 ```
-![Preview](./images/Ir2s3%20cli.png)
+
+![Preview](https://images.bugnone.dev/%2Fr2s3cli%2Fmain.png)
 
 ```bash
 r2s3-cli --Help
@@ -97,18 +100,21 @@ Use "r2s3-cli [command] --help" for more information about a command.
 ## Commands
 
 ### Upload
+
 ```bash
 r2s3-cli upload file.jpg                    # Upload file
 r2s3-cli upload file.jpg --compress normal  # Upload with compression
 ```
 
 ### List
+
 ```bash
 r2s3-cli list                     # List all files
 r2s3-cli list photos/             # List with prefix
 ```
 
 ### Delete
+
 ```bash
 r2s3-cli delete file.jpg                    # Delete with confirmation
 r2s3-cli delete file.jpg --force            # Delete without confirmation
