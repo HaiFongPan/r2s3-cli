@@ -15,6 +15,15 @@ func CreateUnifiedPanelStyle(width, height int) lipgloss.Style {
 		Foreground(lipgloss.Color(ColorText))
 }
 
+// CreateRightPanelStyle creates a borderless right panel style
+func CreateRightPanelStyle(width, height int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Padding(1, 2).
+		Foreground(lipgloss.Color(ColorText))
+}
+
 // CreateSectionHeaderStyle creates a glamorous section header style
 func CreateSectionHeaderStyle() lipgloss.Style {
 	return lipgloss.NewStyle().

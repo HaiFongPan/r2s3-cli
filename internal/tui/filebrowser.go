@@ -1474,7 +1474,7 @@ func (m *FileBrowserModel) renderRightPanel(width int) string {
 		}
 	}
 
-	return theme.CreateUnifiedPanelStyle(panelWidth, panelHeight).Render(content.String())
+	return theme.CreateRightPanelStyle(panelWidth, panelHeight).Render(content.String())
 }
 
 // renderFloatingDialog renders a dialog floating over the base view while keeping base visible
